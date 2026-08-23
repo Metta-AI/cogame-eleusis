@@ -34,12 +34,11 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "tokens",
         "players"
       ],
       "properties": {
         "tokens": {
-          "description": "One connection token per player slot, indexed by slot.",
+          "description": "One connection token per player slot, indexed by slot. Injected by the commissioner at dispatch, which is why no variant and no certification fixture carries it (and why it is not required here) -- the game refuses to start if it arrives with a different length than players.",
           "type": "array",
           "minItems": 5,
           "maxItems": 5,

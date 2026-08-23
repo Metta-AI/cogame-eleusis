@@ -150,6 +150,39 @@ if str(seats_expected).isdigit() and int(seats_expected) != seats:
         "manifest disagree; fix whichever is wrong."
     )
 
+# --------------------------------------------------------------------------
+# FORK ADDITION (eleusis): every variant and the certification fixture must
+# validate against game.config_schema. The schema is additionalProperties:
+# false, so a key it does not define, or a required key a fixture omits, is a
+# config the platform would reject at dispatch -- and nothing else in CI reads
+# the schema at all. This is a structural check, not a full JSON Schema
+# validator: required keys present, no undefined keys. No dependency.
+# --------------------------------------------------------------------------
+schema = game.get("config_schema") or {}
+schema_properties = set((schema.get("properties") or {}).keys())
+schema_required = list(schema.get("required") or [])
+fixtures = [
+    (f"variants[{variant.get('id')}].game_config", dict(variant.get("game_config") or {}))
+    for variant in (manifest.get("variants") or [])
+]
+fixtures.append(("certification.game_config", dict(cert.get("game_config") or {})))
+schema_errors = []
+for label, fixture in fixtures:
+    for key in schema_required:
+        if key not in fixture:
+            schema_errors.append(f"{label} omits required key {key!r}")
+    if schema.get("additionalProperties") is False:
+        for key in sorted(set(fixture) - schema_properties):
+            schema_errors.append(
+                f"{label} carries {key!r}, which game.config_schema does not define"
+            )
+if schema_errors:
+    raise SystemExit(
+        "CONFIG-SCHEMA FAIL: a shipped game_config does not validate against "
+        "game.config_schema:\n  " + "\n  ".join(schema_errors)
+    )
+print(f"config_schema OK: {len(fixtures)} game_config fixtures validate")
+
 players = list(fixture_players)
 while len(players) < seats:
     players.append({"name": f"smoke-{len(players)}"})
