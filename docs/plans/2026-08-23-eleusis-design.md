@@ -582,14 +582,21 @@ things, and none of paintbot's files are used here).
   (the prediction-test strip row, HTML so it stays crisp at 360 px) and `<div id="drawer">`
   (the spectator-only hoard drawer). The only edits to existing markup are two text changes:
   the wordmark word and the `<title>`.
-- The chrome half of `client/renderer.js` is kept verbatim: `makeNameMap` / `applyNames` /
-  `clampName` / `isBaselineFiller` (the two name spaces), `renderFeed` / `blockHead` /
-  `escapeHtml`, `bindFeedToggle`, `updateScorebug`, `updateEndscreen` / `reasonLine`,
-  `buildScrub`, `attachLive` / `attachReplay` and their pacing loop, `makeEffects`,
-  `ellipsize` / `roundRect` / `wrapLines` / `drawBubble`. Only the board-drawing half
-  (`computeLayout`, `draw`, `drawBelt`, `drawStation`, the conveyor and seismograph helpers)
-  is replaced by the lab bench, and `describeEvent` is rewritten for the new event kinds. The
-  global export is renamed `EleusisRenderer`.
+- The chrome half of `client/renderer.js` is **bullwhip's, kept structure for structure** — the
+  same functions in the same order, doing the same job — but only these are byte-identical:
+  `isBaselineFiller` / `makeNameMap` / `applyNames` / `clampName` (the two name spaces),
+  `bindFeedToggle`, `ellipsize`, `roundRect`. The rest keep their shape and are edited where
+  the state shape changed: `renderFeed` / `blockHead` / `escapeHtml`, `updateScorebug`,
+  `updateEndscreen` / `reasonLine`, `buildScrub`, `attachLive` / `attachReplay` and their
+  pacing loop, `makeEffects`, `matchHeader`, `stateToView`, `playerFrameToState` — every diff
+  is a rename of a bullwhip field to its eleusis counterpart (`seat.cost` → `seat.score`,
+  `week` → `round`) or this game's own content. `describeEvent` is rewritten for the new event
+  kinds. The board-drawing half (`computeLayout`, `draw`, `drawBelt`, `drawStation`, the
+  conveyor and seismograph helpers) is replaced by the lab bench, and with it go the three
+  helpers that only served the conveyor scene and its endcard: `wrapLines` and `drawBubble`
+  (the speech bubbles) and `peakOrders` (a "peak order" endcard column this game has no
+  counterpart for). `relayout` / `bindRelayout` are added (see Transport rules). The global
+  export is renamed `EleusisRenderer`.
 - **Elements removed from the starter:** none of the chrome. Bullwhip's replay page ships **no
   `#viewpanel`** (no zoom bar, no minimap) — and the fork **adds none**: the lab bench is a
   fixed composition drawn to fit the canvas at every size, so there is nothing larger than the
