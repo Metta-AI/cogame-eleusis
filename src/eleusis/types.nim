@@ -61,6 +61,8 @@ type
     verdict*: Verdict        ## experiment/disclose
     cost*: float             ## experiment
     scripted*: bool          ## experiment/skip/answer
+    fallback*: bool          ## experiment/skip/answer: the scripted baseline
+                             ## stood in for an LLM reply that never arrived
     hypothesis*: string      ## experiment/skip/answer: the seat's public line
     text*: string            ## experiment/skip/answer: notes; end: reason
     mode*: string            ## disclose: publish | hoard | duplicate

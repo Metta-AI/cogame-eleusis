@@ -250,7 +250,9 @@ play**.
 **Degrade, never hang.** Per seat, per turn: parse/legality failure or transport timeout →
 **one retry** in a smaller batch carrying `"Your previous reply was invalid…"` → still failing
 → the **`openbook` scripted decision** for that seat, logged
-`eleusis llm: seat N falling back to scripted decision`. A legality check is run *before*
+`eleusis llm: seat N falling back to scripted decision` **and recorded on the decision event
+as `scripted: true, fallback: true`**, so phase 60 can count the fallbacks from the replay as
+well as from the log. A legality check is run *before*
 accepting a reply (a `probe` copy of the sim applies it), so an illegal move never reaches the
 sim. A slot that never delivers a prompt (player pod never connected within
 `player_connect_timeout_seconds = 180`) plays `openbook` for the whole episode. Any raise
@@ -423,11 +425,11 @@ deciding twice in a turn, a malformed strip, a wrong-length answer vector, a dec
 |---|---|
 | `start` | — (`round: -1`) |
 | `round` | `round` |
-| `experiment` | `round`, `seat`, `strip`, `verdict`, `cost`, `scripted`, `hypothesis`, `text` (notes) |
-| `skip` | `round`, `seat`, `scripted`, `hypothesis`, `text` |
+| `experiment` | `round`, `seat`, `strip`, `verdict`, `cost`, `scripted`, `fallback`, `hypothesis`, `text` (notes) |
+| `skip` | `round`, `seat`, `scripted`, `fallback`, `hypothesis`, `text` |
 | `disclose` | `round`, `seat`, `strip`, `verdict`, `mode` (`publish`\|`hoard`\|`duplicate`) |
 | `test` | `test`, `round`, `strips[]`, `truth[]` (derived; asserted on re-derivation) |
-| `answer` | `test`, `seat`, `answers[]`, `correct`, `scripted`, `hypothesis`, `text` |
+| `answer` | `test`, `seat`, `answers[]`, `correct`, `scripted`, `fallback`, `hypothesis`, `text` |
 | `settle` | `test`, `correct[5]`, `pool[5]`, `credit[5]`, `scores[5]`, `citations[]` = `[{author, by, strip, amount}]` |
 | `end` | `round` = rounds played, `text` = reason, `rule` = `ruleText`, `ruleId`, `closest` |
 

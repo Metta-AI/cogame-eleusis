@@ -42,6 +42,9 @@ type
     answers*: seq[Verdict]  ## test turns only
     hypothesis*: string
     notes*: string          ## "" when the reply carried none
+    fallback*: bool         ## true when the scripted baseline stood in for an
+                            ## LLM reply that never arrived, so the server can
+                            ## record it on the event and phase 60 can count it
 
   LlmTransport = enum
     ltNone, ltBedrock, ltAnthropic
@@ -581,3 +584,6 @@ proc decideAll*(
     let seat = seats[index]
     echo "eleusis llm: seat ", seat, " falling back to scripted decision"
     result[index] = scriptedAction(sim, seat, skOpenbook)
+    ## Recorded on the decision event too, not only on stdout: the replay is
+    ## what phase 60 counts fallbacks from.
+    result[index].fallback = true

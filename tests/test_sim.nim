@@ -403,6 +403,7 @@ suite "replay":
       check back.text == event.text
       check back.hypothesis == event.hypothesis
       check back.scripted == event.scripted
+      check back.fallback == event.fallback
       check back.strips == event.strips
       check back.truth == event.truth
       check back.answers == event.answers
@@ -417,6 +418,38 @@ suite "replay":
         check back.ruleId == event.ruleId
         check back.closest == event.closest
     check kinds.len == 9
+
+  test "a scripted fallback is recorded on the event and in the replay":
+    ## An LLM seat whose reply never arrived plays the openbook baseline; the
+    ## replay has to say so, or phase 60 cannot count the fallbacks.
+    var sim = initSim(fixtureConfig(rounds = 6, seed = 13))
+    sim.applyResearch(0, "RBGY", false, "", "", true, fallback = true)
+    sim.applyResearch(1, "", false, "", "", true, fallback = true)
+    sim.applyResearch(2, "RRBG", false, "", "", false)
+    var seen = 0
+    for event in sim.events:
+      case event.kind
+      of evExperiment, evSkip:
+        let node = event.eventToJson()
+        check node["fallback"].getBool() == event.fallback
+        case event.seat
+        of 0, 1:
+          check event.fallback
+          check event.scripted
+          inc seen
+        else:
+          check not event.fallback
+          inc seen
+      else:
+        discard
+    check seen == 3
+    ## The flag survives the round trip the viewer and phase 60 read.
+    let frames = replayMatch(sim.config, sim.events)
+    var replayed = 0
+    for event in frames[^1].events:
+      if event.kind in {evExperiment, evSkip} and event.fallback:
+        inc replayed
+    check replayed == 2
 
   test "a recorded episode re-derives frame by frame":
     let config = fixtureConfig(rounds = 6, seed = 11, testEvery = 3)

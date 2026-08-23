@@ -323,17 +323,22 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
-          let wasScripted = scripted[seat] != skNone or client.disabled
+          ## A decision the LLM never delivered is a scripted move, and it is
+          ## recorded as one: `scripted` true and `fallback` true on the event.
+          let wasScripted =
+            scripted[seat] != skNone or client.disabled or decision.fallback
           try:
             if testing:
               state.sim.applyAnswers(seat, decision.answers, decision.publish,
-                decision.hypothesis, decision.notes, wasScripted)
+                decision.hypothesis, decision.notes, wasScripted,
+                decision.fallback)
             else:
               echo "eleusis: ", state.sim.names[seat], " tests ",
                 (if decision.strip.len > 0: decision.strip else: "(nothing)"),
                 (if decision.publish: " and publishes" else: " and hoards")
               state.sim.applyResearch(seat, decision.strip, decision.publish,
-                decision.hypothesis, decision.notes, wasScripted)
+                decision.hypothesis, decision.notes, wasScripted,
+                decision.fallback)
           except CatchableError as error:
             echo "eleusis: reply rejected (", error.msg,
               "); using scripted fallback"
@@ -343,10 +348,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               let fallback = scriptedAction(state.sim, seat, skOpenbook)
               if testing:
                 state.sim.applyAnswers(seat, fallback.answers,
-                  fallback.publish, fallback.hypothesis, "", true)
+                  fallback.publish, fallback.hypothesis, "", true, true)
               else:
                 state.sim.applyResearch(seat, fallback.strip,
-                  fallback.publish, fallback.hypothesis, "", true)
+                  fallback.publish, fallback.hypothesis, "", true, true)
             except CatchableError as inner:
               echo "eleusis: scripted fallback refused too: ", inner.msg
         state.broadcastLocked()

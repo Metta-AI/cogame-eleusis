@@ -702,13 +702,15 @@ proc discloseNow(sim: var Sim, seat: int, publish: bool) =
   event.mode = mode
   sim.addEvent(event)
 
-proc runExperiment(sim: var Sim, seat: int, strip: string, scripted: bool) =
+proc runExperiment(sim: var Sim, seat: int, strip: string, scripted: bool,
+    fallback = false) =
   sim.clearMachine()
   if strip.len == 0:
     var event = blankEvent(evSkip)
     event.round = sim.round
     event.seat = seat
     event.scripted = scripted
+    event.fallback = fallback
     event.hypothesis = sim.seats[seat].hypothesis
     event.text = sim.seats[seat].notes
     sim.addEvent(event)
@@ -730,6 +732,7 @@ proc runExperiment(sim: var Sim, seat: int, strip: string, scripted: bool) =
     event.verdict = verdict
     event.cost = sim.config.experimentCost
     event.scripted = scripted
+    event.fallback = fallback
     event.hypothesis = sim.seats[seat].hypothesis
     event.text = sim.seats[seat].notes
     sim.addEvent(event)
@@ -738,7 +741,7 @@ proc runExperiment(sim: var Sim, seat: int, strip: string, scripted: bool) =
     sim.advanceTurn()
 
 proc recordAnswer(sim: var Sim, seat: int, answers: seq[Verdict],
-    scripted: bool) =
+    scripted: bool, fallback = false) =
   if answers.len != sim.test.strips.len:
     raise newException(EleusisError,
       "a test needs exactly " & $sim.test.strips.len & " answers, got " &
@@ -759,6 +762,7 @@ proc recordAnswer(sim: var Sim, seat: int, answers: seq[Verdict],
   event.answers = answers
   event.correct = correct
   event.scripted = scripted
+  event.fallback = fallback
   event.hypothesis = sim.seats[seat].hypothesis
   event.text = sim.seats[seat].notes
   sim.addEvent(event)
@@ -767,7 +771,7 @@ proc recordAnswer(sim: var Sim, seat: int, answers: seq[Verdict],
     sim.settleTest()
 
 proc applyResearch*(sim: var Sim, seat: int, strip: string, publish: bool,
-    hypothesis, notes: string, scripted: bool) =
+    hypothesis, notes: string, scripted: bool, fallback = false) =
   ## `seat` decides this research round: what to do with the result it is
   ## holding, and which strip to feed the machine ("" = skip). Raises
   ## EleusisError on anything illegal; the fifth decision resolves the turn.
@@ -783,10 +787,11 @@ proc applyResearch*(sim: var Sim, seat: int, strip: string, publish: bool,
   let clean = normaliseStrip(strip)
   sim.recordTalk(seat, hypothesis, notes)
   sim.discloseNow(seat, publish)
-  sim.runExperiment(seat, clean, scripted)
+  sim.runExperiment(seat, clean, scripted, fallback)
 
 proc applyAnswers*(sim: var Sim, seat: int, answers: seq[Verdict],
-    publish: bool, hypothesis, notes: string, scripted: bool) =
+    publish: bool, hypothesis, notes: string, scripted: bool,
+    fallback = false) =
   ## `seat` answers the open prediction test. Its pending result is disclosed
   ## first, so the last research round's result always gets a decision.
   if sim.done:
@@ -804,7 +809,7 @@ proc applyAnswers*(sim: var Sim, seat: int, answers: seq[Verdict],
         $answers.len)
   sim.recordTalk(seat, hypothesis, notes)
   sim.discloseNow(seat, publish)
-  sim.recordAnswer(seat, answers, scripted)
+  sim.recordAnswer(seat, answers, scripted, fallback)
 
 proc endEarly*(sim: var Sim) =
   ## Stop now, between batches. The platform kills an episode that outlives
@@ -1025,10 +1030,12 @@ proc eventToJson*(event: GameEvent): JsonNode =
     result["verdict"] = %($event.verdict)
     result["cost"] = %event.cost
     result["scripted"] = %event.scripted
+    result["fallback"] = %event.fallback
     if event.hypothesis.len > 0:
       result["hypothesis"] = %event.hypothesis
   of evSkip:
     result["scripted"] = %event.scripted
+    result["fallback"] = %event.fallback
     if event.hypothesis.len > 0:
       result["hypothesis"] = %event.hypothesis
   of evDisclose:
@@ -1053,6 +1060,7 @@ proc eventToJson*(event: GameEvent): JsonNode =
     result["answers"] = answers
     result["correct"] = %event.correct
     result["scripted"] = %event.scripted
+    result["fallback"] = %event.fallback
     if event.hypothesis.len > 0:
       result["hypothesis"] = %event.hypothesis
   of evSettle:
@@ -1105,6 +1113,7 @@ proc eventFromJson*(node: JsonNode): GameEvent =
   result.strip = node{"strip"}.getStr("")
   result.cost = node{"cost"}.getFloat(0.0)
   result.scripted = node{"scripted"}.getBool(false)
+  result.fallback = node{"fallback"}.getBool(false)
   result.hypothesis = node{"hypothesis"}.getStr("")
   result.text = node{"text"}.getStr("")
   result.mode = node{"mode"}.getStr("")
@@ -1182,14 +1191,15 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
       ## The seat's public hypothesis line and private notes are recorded on
       ## the decision event, so the replay restores them with it.
       sim.recordTalk(event.seat, event.hypothesis, event.text)
-      sim.runExperiment(event.seat, event.strip, event.scripted)
+      sim.runExperiment(event.seat, event.strip, event.scripted,
+        event.fallback)
       if evaluate(sim.rule, event.strip) != event.verdict:
         raise newException(EleusisError,
           "the machine's verdict for " & event.strip &
             " does not match the re-derivation")
     of evSkip:
       sim.recordTalk(event.seat, event.hypothesis, event.text)
-      sim.runExperiment(event.seat, "", event.scripted)
+      sim.runExperiment(event.seat, "", event.scripted, event.fallback)
     of evTest:
       if sim.test.strips != event.strips or sim.test.truth != event.truth:
         raise newException(EleusisError,
@@ -1198,7 +1208,8 @@ proc replayMatch*(config: GameConfig, events: seq[GameEvent]): seq[Sim] =
         sim.events.add(event)
     of evAnswer:
       sim.recordTalk(event.seat, event.hypothesis, event.text)
-      sim.recordAnswer(event.seat, event.answers, event.scripted)
+      sim.recordAnswer(event.seat, event.answers, event.scripted,
+        event.fallback)
     of evSettle:
       if sim.testCorrect.len == 0 or sim.testCorrect[^1] != event.correctAll:
         raise newException(EleusisError,
