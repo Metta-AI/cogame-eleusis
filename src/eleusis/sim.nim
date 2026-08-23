@@ -107,6 +107,7 @@ type
     answers*: seq[seq[Verdict]]
     answered*: seq[bool]
     open*: bool
+    discarded*: bool         ## closed by the deadline, never scored
 
   Phase* = enum
     phResearch = "research"
@@ -840,6 +841,10 @@ proc endEarly*(sim: var Sim) =
       sim.seats[seat].correct -= correct
       sim.seats[seat].answered -= sim.test.strips.len
     sim.test.open = false
+    ## Closed, but NOT settled: it scored nobody. The viewer keys its truth
+    ## stamps and correctness pips on `open`, so without this flag a
+    ## discarded test would be revealed as though it had been marked.
+    sim.test.discarded = true
   sim.settle("deadline")
 
 # ---- Results ----------------------------------------------------------------
@@ -986,7 +991,8 @@ proc benchStateJson*(sim: Sim): JsonNode =
       "truth": truth,
       "answers": answers,
       "correct": correct,
-      "open": sim.test.open
+      "open": sim.test.open,
+      "discarded": sim.test.discarded
     }
   var citations = newJArray()
   for citation in sim.citations:

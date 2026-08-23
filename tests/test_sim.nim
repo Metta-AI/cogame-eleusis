@@ -354,6 +354,9 @@ suite "endings":
       sim.applyAnswers(seat, sim.answerWith(4), false, "", "", true)
     check sim.testsDone == 1
     check not sim.done
+    ## A test that was actually marked is settled, not discarded.
+    check not sim.benchStateJson()["test"]["open"].getBool()
+    check not sim.benchStateJson()["test"]["discarded"].getBool()
     for round in 4 .. 6:
       sim.researchAll(offset = round * 7)
     check sim.phase == phTest
@@ -386,6 +389,12 @@ suite "endings":
       check sim.seats[seat].answered == 6    ## only the settled test counts
     check sim.seats[0].correct == 4
     check sim.resultsJson()["reason"].getStr() == "deadline"
+    ## The discarded test is marked as such in the frame the viewer reads, so
+    ## its truth stamps and correctness pips stay sealed: it scored nobody.
+    let frame = sim.benchStateJson()
+    check frame["test"]["index"].getInt() == 2
+    check not frame["test"]["open"].getBool()
+    check frame["test"]["discarded"].getBool()
     ## Settling twice is a no-op, and the transcript ends with the reveal.
     sim.endEarly()
     check sim.events[^1].kind == evEnd

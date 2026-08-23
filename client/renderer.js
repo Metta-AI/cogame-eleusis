@@ -856,8 +856,11 @@
       element.innerHTML = "";
       return;
     }
-    var settled = !test.open;
-    var html = '<span class="tp-caption">TEST ' + (test.index || 0) + "</span>";
+    // A test the deadline closed was never marked: it is not open, but its
+    // truth and its pips stay sealed, because nobody was scored on it.
+    var settled = !test.open && !test.discarded;
+    var html = '<span class="tp-caption">TEST ' + (test.index || 0) +
+      (test.discarded ? " · DISCARDED" : "") + "</span>";
     test.strips.forEach(function (strip, i) {
       var tokens = "";
       String(strip).split("").forEach(function (letter) {
