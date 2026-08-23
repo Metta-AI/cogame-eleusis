@@ -239,9 +239,14 @@ play**.
 - Typical batch latency on haiku with a ~2.5 k-token prompt: 6–12 s, absorbed by the spacing
   floor. Typical episode: **28 × 12 s ≈ 336 s** plus ≤ 30 s of connect/startup ≈ **370 s ≈
   51 % of the 720 s budget**.
-- Worst case is bounded, not hoped for: `llmTimeoutSeconds` = **40**, so a pathological episode
-  where every batch burns its full timeout reaches 720 s after ~18 batches and settles
-  `deadline` with 14 rounds and 2 tests scored. The deadline is checked **before every batch**.
+- Worst case is bounded, not hoped for: `llmTimeoutSeconds` = **40** *per batch*, and a turn
+  whose replies all fail sends a **second** parallel batch — the one retry — so a pathological
+  turn costs ≤ ~80 s, not 40 s. An episode where every batch burns its full timeout *and* every
+  reply is invalid therefore reaches 720 s after ~9 turns (about 7 rounds and 1 test) and
+  settles `deadline`; if the retry is not needed it is the ~18 batches / 14 rounds / 2 tests
+  the arithmetic above gives. Both are bounded and both are acceptable endings: the retry is a
+  second *parallel* batch, never sequential per-seat calls, and the deadline is checked
+  **before every batch**.
 - `sampleEpisode(config)` fits the episode to the budget and is idempotent (guarded by
   `sampled`, exactly like bullwhip): `maxBatches = int(episodeTimeoutSeconds * 0.6 * 1000 /
   max(minBatchSpacingMs, 1)) - 2`; while `rounds + rounds div testEvery > maxBatches`, `rounds`
