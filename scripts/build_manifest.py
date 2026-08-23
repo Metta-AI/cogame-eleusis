@@ -256,7 +256,7 @@ GLOBAL_PROTOCOL = (
     "secrets:[{strip,verdict,round}]} x5 by seat],\"board\":[{strip,verdict,"
     "author,round,cites,duplicate} in publication order],\"machine\":{seat,"
     "round,strip,verdict}|null,\"test\":{index,round,strips,truth,answers,"
-    "correct,open}|null,\"citations\":[{author,by,strip,amount,test}],"
+    "correct,open,discarded}|null,\"citations\":[{author,by,strip,amount,test}],"
     "\"decided\":int,\"round\":int,\"rounds\":int,\"testEvery\":int,"
     "\"testStrips\":int,\"testsDone\":int,\"experimentCost\":float,"
     "\"knowledgePool\":float,\"citePot\":float,\"phase\":\"research|test|"
@@ -290,7 +290,11 @@ CONFIG_SCHEMA = {
     "required": ["tokens", "players"],
     "properties": {
         "tokens": seat_array(
-            "One connection token per player slot, indexed by slot.",
+            "One connection token per player slot, indexed by slot. Injected by "
+            "the commissioner at dispatch, which is why no variant and no "
+            "certification fixture carries it -- the Coworld schema still "
+            "requires it to be declared required here, and the game refuses to "
+            "start if it arrives with a different length than players.",
             {"type": "string", "minLength": 1},
         ),
         "players": seat_array(

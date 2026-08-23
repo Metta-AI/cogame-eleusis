@@ -160,7 +160,10 @@ if str(seats_expected).isdigit() and int(seats_expected) != seats:
 # --------------------------------------------------------------------------
 schema = game.get("config_schema") or {}
 schema_properties = set((schema.get("properties") or {}).keys())
-schema_required = list(schema.get("required") or [])
+# `tokens` is required by the Coworld schema (the certifier rejects a
+# config_schema that does not require it) but is injected by the commissioner at
+# dispatch, so no stored fixture carries it. Check every other required key.
+schema_required = [k for k in (schema.get("required") or []) if k != "tokens"]
 fixtures = [
     (f"variants[{variant.get('id')}].game_config", dict(variant.get("game_config") or {}))
     for variant in (manifest.get("variants") or [])
