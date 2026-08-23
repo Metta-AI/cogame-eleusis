@@ -360,9 +360,26 @@ suite "endings":
     ## Only two seats answer the second test, then the clock stops play.
     sim.applyAnswers(0, sim.answerWith(6), false, "", "", true)
     sim.applyAnswers(1, sim.answerWith(6), false, "", "", true)
+    ## The three seats that never answered are still holding a result.
+    var holding: seq[int]
+    var hoardedBefore: array[Seats, int]
+    var held: array[Seats, string]
+    for seat in 0 ..< Seats:
+      hoardedBefore[seat] = sim.seats[seat].hoarded
+      if sim.seats[seat].pending.isSome:
+        holding.add(seat)
+        held[seat] = sim.seats[seat].pending.get().strip
+    check holding == @[2, 3, 4]
     sim.endEarly()
     check sim.done
     check sim.reason == "deadline"
+    ## An undisclosed result was never on the board: it stays hoarded.
+    for seat in holding:
+      check sim.seats[seat].pending.isNone
+      check sim.seats[seat].hoarded == hoardedBefore[seat] + 1
+      check sim.seats[seat].secrets[^1].strip == held[seat]
+      for fact in sim.board:
+        check fact.strip != held[seat]
     check sim.testsDone == 1                 ## the open test is unscored
     check sim.testCorrect.len == 1
     for seat in 0 ..< Seats:
@@ -477,6 +494,8 @@ suite "replay":
     check shortFrames[^1].done
     check shortFrames[^1].reason == "deadline"
     check shortFrames[^1].roundsPlayed == 1
+    ## Including the results the seats were still holding when it stopped.
+    check $shortFrames[^1].benchStateJson() == $short.benchStateJson()
 
   test "a tampered test event is rejected":
     let config = fixtureConfig(rounds = 4, seed = 11, testEvery = 4)

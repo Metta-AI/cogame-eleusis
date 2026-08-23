@@ -817,9 +817,17 @@ proc endEarly*(sim: var Sim) =
   ## Stop now, between batches. The platform kills an episode that outlives
   ## its timeout and keeps NOTHING, so a short honest episode always beats a
   ## long one that never lands. An open test that was never fully answered is
-  ## discarded unscored; tests already settled keep their money.
+  ## discarded unscored; tests already settled keep their money; a result a
+  ## seat is still holding stays hoarded.
   if sim.done:
     return
+  ## A result a seat is still holding when the clock stops stays HOARDED: it
+  ## never reached the corkboard, so it goes to that seat's drawer exactly as
+  ## a `hoard` decision would have put it there. The disclosure is recorded on
+  ## the transcript, so a replay re-derives the same drawers and counters.
+  for seat in 0 ..< Seats:
+    if sim.seats[seat].pending.isSome:
+      sim.discloseNow(seat, publish = false)
   if sim.phase == phTest and sim.test.open:
     for seat in 0 ..< Seats:
       if not sim.test.answered[seat]:
