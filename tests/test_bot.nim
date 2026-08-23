@@ -5,7 +5,7 @@
 ## partner worth beating.
 
 import std/[json, monotimes, options, os, strutils, times, unicode, unittest]
-import eleusis/[llm, sim]
+import eleusis/[llm, server, sim]
 
 proc fixture(seed: int, rounds = 24, testEvery = 6): GameConfig =
   result = defaultGameConfig()
@@ -45,6 +45,29 @@ proc playScripted(config: GameConfig, kinds: array[Seats, ScriptKind]): Sim =
       else:
         result.applyResearch(seat, decision.strip, decision.publish,
           decision.hypothesis, decision.notes, true)
+
+suite "the play clock":
+  test "the play deadline is never switched off":
+    ## The deadline is what makes the episode settle and score inside 60% of
+    ## the platform's timeout. A non-positive value anywhere in the chain must
+    ## fall through to the next source, never to "no deadline at all".
+    var config = fixture(1)
+    check playTimeoutSeconds(config, "600") == 600.0
+    check playTimeoutSeconds(config, "  600  ") == 600.0
+    ## Env garbage and an absent env fall back to the configured assumption.
+    check playTimeoutSeconds(config, "not-a-number") ==
+      config.episodeTimeoutSeconds.float
+    check playTimeoutSeconds(config, "") == config.episodeTimeoutSeconds.float
+    check playTimeoutSeconds(config, "0") == config.episodeTimeoutSeconds.float
+    ## And a config whose own timeout is unusable falls through to the
+    ## built-in default rather than leaving the episode unbounded.
+    config.episodeTimeoutSeconds = 0
+    check playTimeoutSeconds(config, "") ==
+      defaultGameConfig().episodeTimeoutSeconds.float
+    config.episodeTimeoutSeconds = -5
+    check playTimeoutSeconds(config, "-1") ==
+      defaultGameConfig().episodeTimeoutSeconds.float
+    check playTimeoutSeconds(config, "") > 0.0
 
 suite "scripted baselines":
   test "five baseline seats play full, legal episodes":

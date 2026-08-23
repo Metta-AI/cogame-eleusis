@@ -243,6 +243,22 @@ const PlayBudgetFraction* = 0.6
   ## container start, player connects, and writing the artifacts — the part
   ## that must never be the thing that runs out of time.
 
+proc playTimeoutSeconds*(config: GameConfig, hostedTimeout: string): float =
+  ## The wall clock the episode plans against: the platform's value when it
+  ## gives one, else the configured assumption, else the built-in default.
+  ## NEVER zero or negative — the play deadline is derived from this, and a
+  ## non-positive value would switch the deadline off altogether and let the
+  ## episode run until the platform kills it and keeps nothing.
+  let hosted = hostedTimeout.strip()
+  result =
+    if hosted.len > 0:
+      try: parseFloat(hosted) except ValueError: 0.0
+    else: 0.0
+  if result <= 0.0:
+    result = config.episodeTimeoutSeconds.float
+  if result <= 0.0:
+    result = defaultGameConfig().episodeTimeoutSeconds.float
+
 proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = state.config
@@ -271,19 +287,11 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     ## worker sidecar, NOT to the game container, so when the env is silent
     ## assume the configured platform default rather than playing open-ended.
     let hostedTimeout = getEnv("COWORLD_TIMEOUT_SECONDS", "").strip()
-    var timeoutSeconds =
-      if hostedTimeout.len > 0:
-        try: parseFloat(hostedTimeout) except ValueError: 0.0
-      else: 0.0
-    if timeoutSeconds <= 0.0:
-      timeoutSeconds = config.episodeTimeoutSeconds.float
-    let playDeadline =
-      if timeoutSeconds > 0.0: gameStart + timeoutSeconds * PlayBudgetFraction
-      else: 0.0
-    if playDeadline > 0.0:
-      echo "eleusis: episode timeout ", timeoutSeconds.int, "s (",
-        (if hostedTimeout.len > 0: "from env" else: "assumed"),
-        "); playing until ", (timeoutSeconds * PlayBudgetFraction).int, "s"
+    let timeoutSeconds = playTimeoutSeconds(config, hostedTimeout)
+    let playDeadline = gameStart + timeoutSeconds * PlayBudgetFraction
+    echo "eleusis: episode timeout ", timeoutSeconds.int, "s (",
+      (if hostedTimeout.len > 0: "from env" else: "assumed"),
+      "); playing until ", (timeoutSeconds * PlayBudgetFraction).int, "s"
 
     while true:
       var simCopy: Sim
@@ -296,8 +304,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           break
         ## Checked BEFORE every batch: an episode that outruns the platform
         ## timeout is discarded whole, so give up rounds rather than the
-        ## result.
-        if playDeadline > 0.0 and epochTime() > playDeadline:
+        ## result. `playTimeoutSeconds` guarantees a deadline exists.
+        if epochTime() > playDeadline:
           echo "eleusis: episode deadline reached after ",
             state.sim.roundsPlayed, "/", config.rounds,
             " rounds; ending early"
