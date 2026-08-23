@@ -4,7 +4,7 @@
 ## The version-space predictor must also actually learn the rule, or it is no
 ## partner worth beating.
 
-import std/[json, monotimes, options, strutils, times, unicode, unittest]
+import std/[json, monotimes, options, os, strutils, times, unicode, unittest]
 import eleusis/[llm, sim]
 
 proc fixture(seed: int, rounds = 24, testEvery = 6): GameConfig =
@@ -118,6 +118,26 @@ suite "scripted baselines":
       sim.applyResearch(seat, decisions[index].strip, decisions[index].publish,
         decisions[index].hypothesis, decisions[index].notes, true)
     check sim.round == 2
+
+  test "a slot that never delivered a prompt plays openbook, not an LLM call":
+    ## The reference player always delivers a prompt (its own default strategy
+    ## when PLAYER_PROMPT is empty), so an empty prompt means the pod never
+    ## connected. That seat plays the scripted baseline for the episode
+    ## instead of calling Claude with an empty operator block.
+    putEnv("ANTHROPIC_API_KEY", "not-a-real-key")
+    let config = fixture(17, rounds = 8, testEvery = 4)
+    let client = newLlmClient(config)
+    check not client.disabled
+    var sim = initSim(config)
+    let seats = sim.pendingSeats()
+    let decisions = client.decideAll(sim, seats,
+      @["", "  ", "", "", ""], @[skNone, skNone, skNone, skNone, skNone])
+    check decisions.len == Seats
+    for index, seat in seats:
+      ## No request was ever built, so nothing failed and nothing fell back.
+      check not decisions[index].fallback
+      check decisions[index] == scriptedAction(sim, seat, skOpenbook)
+    delEnv("ANTHROPIC_API_KEY")
 
   test "model replies parse, and illegal ones are rejected":
     check parseDecision(parseJson("""{"experiment": "rb gy"}"""), 6,

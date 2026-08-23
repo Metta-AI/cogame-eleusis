@@ -326,7 +326,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           ## A decision the LLM never delivered is a scripted move, and it is
           ## recorded as one: `scripted` true and `fallback` true on the event.
           let wasScripted =
-            scripted[seat] != skNone or client.disabled or decision.fallback
+            client.playsScripted(prompts[seat], scripted[seat]) or
+            decision.fallback
           try:
             if testing:
               state.sim.applyAnswers(seat, decision.answers, decision.publish,

@@ -523,6 +523,16 @@ proc parseDecision*(payload: JsonNode, testStrips: int, testing: bool):
         "experiment must be a 4-letter string: " & $node)
     result.strip = normaliseStrip(node.getStr())
 
+proc playsScripted*(client: LlmClient, prompt: string,
+    kind: ScriptKind): bool =
+  ## A seat plays a built-in baseline instead of Claude when it registered as
+  ## scripted, when there are no credentials at all, or when it has never
+  ## delivered a prompt — the reference player always sends one (its own
+  ## default strategy when `PLAYER_PROMPT` is empty), so an empty prompt means
+  ## the pod never connected inside `playerConnectTimeoutSeconds`. Such a slot
+  ## plays `openbook` rather than an LLM call with no operator guidance.
+  kind != skNone or client.disabled or prompt.strip().len == 0
+
 proc decideAll*(
   client: LlmClient,
   sim: Sim,
@@ -539,7 +549,7 @@ proc decideAll*(
   var open: seq[int]     ## indexes into `seats` still undecided
   for index, seat in seats:
     let kind = scripted[seat]
-    if kind != skNone or client.disabled:
+    if client.playsScripted(prompts[seat], kind):
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skOpenbook else: kind))
     else:
