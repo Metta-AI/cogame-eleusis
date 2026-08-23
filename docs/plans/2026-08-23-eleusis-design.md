@@ -454,12 +454,22 @@ wasm module emits one per event prefix:
  "machine":{"seat":2,"round":7,"strip":"RBGY","verdict":"pass"},
  "test":{"index":2,"round":12,"strips":["RRBG","..."],"truth":["pass","..."],
          "answers":[["pass","fail","..."], null, "..."],
-         "correct":[4,3,5,2,4],"open":false},
+         "correct":[4,null,5,2,4],"open":false,"discarded":false},
  "citations":[{"author":1,"by":3,"strip":"RBGY","amount":0.5,"test":2}],
+ "decided":3,
  "round":7,"rounds":24,"testEvery":6,"testStrips":6,"testsDone":1,
+ "experimentCost":1.0,"knowledgePool":20.0,"citePot":0.5,
  "phase":"research","rule":"ADJACENT R B — a RED token immediately followed by a BLUE token",
- "ruleId":37,"gameDone":false,"reason":""}
+ "ruleId":37,"closest":2,"gameDone":false,"reason":""}
 ```
+
+`test.answers[j]` and `test.correct[j]` are **null** for a seat that has not answered the open
+test — the frame says "no answer", never a zero that would read as five wrong guesses — and
+`test.discarded` is true only for a test the deadline closed unscored. `decided` counts the
+seats that have decided the live turn; `experimentCost` / `knowledgePool` / `citePot` ride in
+every frame so the viewer never has to be told the economy separately; `closest` is the seat
+with the best lifetime test accuracy so far, or -1. The manifest's `global` protocol text
+documents this same shape key for key.
 
 `seats[].secrets`, `test.truth` and `rule` are **spectator-only**: they appear in this frame
 (the `/global` socket and the replay) and never on a player socket. `machine` is null outside
