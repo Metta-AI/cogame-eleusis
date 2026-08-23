@@ -1,0 +1,586 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "science",
+    "hypothesis-discovery",
+    "mixed-motive",
+    "llm-driven",
+    "turn-based",
+    "five-player",
+    "epistemics",
+    "publish-or-hoard"
+  ],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "eleusis",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Eleusis: science as a game, for five LLM-piloted cogs. A sealed machine holds ONE hidden rule over STRIPS of four coloured tokens (R, B, G, Y) - one entry of a 68-instance catalogue that every seat can read, so the game is a search rather than a guess. Each round every seat pays $1.00 to feed the machine one strip and sees the PASS/FAIL verdict PRIVATELY; on its next turn it decides whether to PUBLISH the result to a shared corkboard (every rival reads it, and the author can earn citation credit) or HOARD it in a drawer only spectators can see. Every 6 rounds a PREDICTION TEST scores everyone on strips nobody has ever tested, exactly half of which pass: a $20 prize pool is split in proportion to correct answers, so every rival you teach takes a slice of your pool. Citation credit pays the other way - when a rival answers a test strip correctly and one of your published results differs from that strip in exactly one token, a $0.50 pot is shared between the authors whose results do. Score is prize money + citation credit - $1.00 per experiment; higher wins, and a seat that only spends finishes negative. Citation rings cannot pay: credit needs a rival to be actually right about a strip nobody has tested. The game is LLM-driven - every turn the server sends each seat's policy prompt plus its own log, the corkboard, the scoreboard and its private notes to Claude as ONE parallel batch, so A POLICY IS JUST A PROMPT: build one by reusing the published player runnable with PLAYER_PROMPT set to your strategy. Two scripted baselines (openbook publishes everything, hoarder publishes nothing) play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{ELEUSIS_IMAGE}}",
+      "run": [
+        "/bin/eleusis"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/eleusis/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Eleusis is a five-player game: citation credit needs an author, a confirmer and a market.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 5
+        },
+        "seed": {
+          "description": "Pins the hidden rule, every prediction-test draw and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "rounds": {
+          "description": "Research rounds in the episode. Every seat decides every round, simultaneously.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 60,
+          "default": 24
+        },
+        "testEvery": {
+          "description": "A prediction test after every N research rounds.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20,
+          "default": 6
+        },
+        "testStrips": {
+          "description": "Strips per prediction test, half PASS and half FAIL. Must be even.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 12,
+          "default": 6
+        },
+        "experimentCost": {
+          "description": "Charged against score for every experiment run.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 1.0
+        },
+        "knowledgePool": {
+          "description": "Prize money each prediction test splits in proportion to correct answers.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200,
+          "default": 20.0
+        },
+        "citePot": {
+          "description": "Per test strip, shared equally by the rival authors whose published results sit one token away from it.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0.5
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between batches at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "minBatchSpacingMs": {
+          "description": "Wall-clock floor between the STARTS of consecutive LLM batches. 12s at five seats is 25 requests/minute, under the hosted Bedrock sidecar's 30/minute per-episode cap.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "default": 12000
+        },
+        "turnDelayMs": {
+          "description": "Extra spectator pacing delay between turns.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 0
+        },
+        "model": {
+          "description": "Claude model that drives every seat.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2000,
+          "default": 900
+        },
+        "llmTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 40
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "knowledge",
+        "credit",
+        "spend",
+        "correct",
+        "answered",
+        "accuracy",
+        "published",
+        "hoarded",
+        "rounds",
+        "maxRounds",
+        "tests",
+        "ruleId",
+        "rule",
+        "closest",
+        "closestName",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "prizes + citation credit - experimentCost x experiments. Higher is better and a score may be negative.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "number"
+          }
+        },
+        "knowledge": {
+          "description": "Prize money won from the prediction tests.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "credit": {
+          "description": "Citation credit earned by published results.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "spend": {
+          "description": "Total experiment cost charged.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "correct": {
+          "description": "Correct predictions over every settled test.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "answered": {
+          "description": "Predictions answered over every settled test.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "accuracy": {
+          "description": "correct / answered, or 0 when the seat answered nothing.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "published": {
+          "description": "Results pinned to the corkboard with authorship.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "hoarded": {
+          "description": "Results kept in the seat's private drawer.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "rounds": {
+          "description": "Research rounds actually played.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxRounds": {
+          "description": "The episode's round count after budget fitting.",
+          "type": "integer",
+          "minimum": 4
+        },
+        "tests": {
+          "description": "Prediction tests settled.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "ruleId": {
+          "description": "The hidden rule's catalogue index, 0..67.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67
+        },
+        "rule": {
+          "description": "The hidden rule in words, revealed on the endcard.",
+          "type": "string"
+        },
+        "closest": {
+          "description": "The seat with the best lifetime test accuracy, or -1 when no test was scored.",
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 4
+        },
+        "closestName": {
+          "description": "That seat's policy name, or \"\".",
+          "type": "string"
+        },
+        "reason": {
+          "description": "How the episode ended: complete (the test after the final round settled) or deadline (the play clock stopped it between batches; settled tests keep their money).",
+          "type": "string",
+          "enum": [
+            "complete",
+            "deadline"
+          ]
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "eleusis.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). An Eleusis policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's own experiment log, the corkboard, the scoreboard, the test results and its private notes to Claude once a turn, all five seats as one parallel batch. game->player frames: {\"type\":\"welcome\",\"protocol\":\"eleusis.player.v1\",\"slot\":N,\"name\":str,\"rounds\":int,\"testEvery\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":str,\"round\":int,\"rounds\":int,\"phase\":\"research|test|done\",\"score\":float,\"knowledge\":float,\"credit\":float,\"spend\":float,\"experiments\":int,\"published\":int,\"hoarded\":int,\"correct\":int,\"answered\":int,\"pending\":{\"strip\":str,\"verdict\":\"pass|fail\"}|null,\"boardSize\":int,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED to the seat's own numbers, because the game is hidden-information: it never carries the rule, the test truth, another seat's drawer or another seat's notes (decisions are server-side, so the redaction loses the policy nothing); {\"type\":\"final\",\"done\":true,\"scores\":[5],\"names\":[5 aliases],\"rule\":str,\"closest\":int,\"reason\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes) is the policy, sent right after connecting and again after welcome; scripted \"openbook\" (or \"1\") plays the built-in publish-everything baseline for that seat, \"hoarder\" the publish-nothing one, \"\" means LLM-driven. The reference player reads PLAYER_PROMPT and PLAYER_SCRIPTED from its environment."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full bench snapshot as JSON after every event: {\"type\":\"state\",\"game\":\"eleusis\",\"seats\":[{name,score,knowledge,credit,spend,experiments,published,hoarded,correct,answered,hypothesis,notes,pending,last:{strip,verdict,mode}|null,secrets:[{strip,verdict,round}]} x5 by seat],\"board\":[{strip,verdict,author,round,cites,duplicate} in publication order],\"machine\":{seat,round,strip,verdict}|null,\"test\":{index,round,strips,truth,answers,correct,open}|null,\"citations\":[{author,by,strip,amount,test}],\"decided\":int,\"round\":int,\"rounds\":int,\"testEvery\":int,\"testStrips\":int,\"testsDone\":int,\"experimentCost\":float,\"knowledgePool\":float,\"citePot\":float,\"phase\":\"research|test|done\",\"rule\":str,\"ruleId\":int,\"closest\":int,\"gameDone\":bool,\"reason\":str,\"policyNames\":[...],\"events\":[{kind:start|round|experiment|skip|disclose|test|answer|settle|end,...}],\"started\":bool,\"done\":bool,\"connected\":[bool]}. The hidden rule (`rule`, `ruleId`), the test `truth` and every seat's `secrets` and `notes` are SPECTATOR-ONLY: they appear here and in the replay, never on a player socket. The events array is append-only and carries the complete transcript. The browser page at /client/global renders the lab bench; /client/replay plays a recorded episode; the static replay viewer bundle renders replays hosted by the platform (index.html?replay=<url>)."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Eleusis is the induction game (Eleusis/Zendo) for five LLM-piloted cogs. A sealed machine holds one hidden rule over 4-token colour strips, drawn from a 68-instance catalogue that every seat can read. Each round a seat pays $1.00 to test one strip and sees the verdict privately; on its next turn it publishes the result to the shared corkboard or hoards it. Every 6 rounds a prediction test on strips nobody has tested splits a $20 pool by correct answers, and citation credit pays authors whose published results sit one token away from a strip a RIVAL got right. Score = prizes + credit - $1.00 per experiment; higher wins. Publish and you arm your rivals for the pool; hoard and you earn no citations. A policy is just a prompt: field one by reusing the published eleusis-player runnable with the PLAYER_PROMPT environment variable set to your strategy. With no LLM credentials (or for seats that register scripted) the server plays the openbook or hoarder baseline, so episodes always complete."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Eleusis rules\n\nFive cogs share one sealed machine. The machine holds ONE hidden rule over\nSTRIPS: ordered sequences of exactly 4 coloured tokens, each R (red), B\n(blue), G (green) or Y (yellow), written as 4 letters, e.g. `RBGY`. The strip\nuniverse is 4^4 = 256, enumerated lexicographically over R < B < G < Y\n(index 0 = RRRR, index 255 = YYYY). Feed the machine a strip and it stamps\nPASS (the strip obeys the rule) or FAIL.\n\n## The hypothesis space is public; the instance is not\n\nThe rule is drawn from this catalogue, which is printed in every seat's\nprompt. That is what makes the game a search rather than a guess.\n\n| # | kind | parameters | instances | PASS iff |\n|---|---|---|---|---|\n| 1 | CONTAINS c | c | 4 | colour c appears at least once |\n| 2 | AT-LEAST-2 c | c | 4 | colour c appears 2 or more times |\n| 3 | PARITY c even/odd | c, even or odd | 8 | the count of c is even (0 counts as even) / odd |\n| 4 | ADJACENT c d | c, d (all 16 ordered pairs, c = d allowed) | 16 | some position i in 1..3 has t[i] = c and t[i+1] = d |\n| 5 | BEFORE c d | c, d (c != d) | 12 | both appear and the first c is left of the first d |\n| 6 | STARTS c | c | 4 | t[1] = c |\n| 7 | ENDS c | c | 4 | t[4] = c |\n| 8 | ENDS-SAME / ENDS-DIFFER | same or differ | 2 | t[1] = t[4] / t[1] != t[4] |\n| 9 | NO-REPEAT / HAS-REPEAT | none or some | 2 | no two adjacent tokens are equal / at least one pair is |\n| 10 | MORE c d | c, d (c != d) | 12 | count(c) > count(d) |\n\n68 instances in all, ruleId 0..67, enumerated template by template and, inside\na template, over its parameter grid in the order written; colours iterate\nR, B, G, Y.\n\nSelection is seeded and deterministic, and skips degenerate instances: the\nchosen rule's PASS fraction over all 256 strips always lies in [0.10, 0.90].\n\n## Resolution order — research round r\n\n1. **Open the round.** The sim emits a `round` event and marks all five seats\n   pending. Each seat's observation is composed from the state at this\n   instant.\n2. **Collect decisions.** All five seats' requests go out as ONE parallel LLM\n   batch. A reply is `{\"experiment\", \"publish\", \"hypothesis\", \"notes\"}`. A\n   reply that times out, fails to parse, or is illegal is retried once with a\n   hint, then replaced by the `openbook` scripted decision for that seat.\n3. **Disclosure of the pending result**, per seat in seat order. Disclosure is\n   pipelined by one turn — you pay, you look at your private verdict, and you\n   decide what to do with it on your NEXT turn, by which time the corkboard\n   has moved:\n   - no pending result: `publish` is ignored and nothing is recorded;\n   - `publish` true and the strip is NOT already on the corkboard: the fact\n     (strip, verdict, author, round) is pinned and the seat becomes its sole\n     author (`disclose` with mode `publish`);\n   - `publish` true and the strip IS already on the corkboard: recorded as a\n     confirmation with no authorship and no credit ever (mode `duplicate`);\n   - `publish` false: the result goes to the seat's private drawer, which\n     only spectators can see (mode `hoard`).\n4. **Experiments**, per seat in seat order. `experiment` is a strip or \"\":\n   - \"\" — nothing is charged (`skip`);\n   - a legal strip — the seat is charged `experimentCost`, the machine is\n     consulted, the strip joins the episode's used-strip set (which\n     prediction tests hold out), and the result becomes the seat's pending\n     result. The verdict is private to that seat.\n5. **Advance.** If `round % testEvery == 0`, or the round was the last, the\n   next turn is a prediction test; otherwise the next research round opens.\n\n## Resolution order — prediction test k\n\n6. **Draw the test.** `testStrips` strips that no experiment has ever touched\n   and no earlier test has used, balanced: half from the rule's PASS set and\n   half from its FAIL set, then shuffled. Balance removes the base-rate\n   exploit — answering all FAIL scores exactly 50%.\n7. **Collect answers.** One parallel batch; the reply is\n   `{\"answers\", \"publish\", \"hypothesis\", \"notes\"}`. Step 3's disclosure runs\n   first (so the last research round's result always gets a decision), then\n   the answers are scored. `answers` must be exactly `testStrips` entries of\n   PASS/FAIL.\n8. **Knowledge pool.** Seat j earns `knowledgePool * c_j / sum(c)`. This is\n   the rivalrous half: every rival you teach takes a slice of your pool.\n9. **Citation settlement.** See economy.md.\n10. **Advance.** After the test following the final research round the\n    episode settles `complete`.\n\n## What a seat sees\n\nIts own alias and seat index, the round and the schedule, the full catalogue,\nthe economy constants, its own experiment log (strip, verdict, and whether it\npublished, hoarded or duplicated it), the whole corkboard, the public\nscoreboard including every seat's latest stated hypothesis, the per-test\ncorrect counts of every seat, and its own private notes fed back verbatim.\n\nHidden from every seat: the rule, every other seat's hoarded results and\nnotes, other seats' choices for the current turn, and the test truth before\nsettlement. Those are spectator-only — they ride in the replay and on\n`/global`, never on a player socket.\n\n## Endings\n\n`complete` (the test after the final research round settled) or `deadline`\n(the play clock stopped the episode between batches; an unfinished test is\ndiscarded unscored and the tests already settled keep their money). No other\n`results.reason` is legal."
+          }
+        },
+        {
+          "id": "economy.md",
+          "title": "economy.md",
+          "content": {
+            "type": "text",
+            "value": "# Eleusis economy\n\n```\nscore(seat) = knowledge(seat) + credit(seat) - experimentCost x experiments(seat)\n```\n\nHigher is better, and a score may be negative: a seat that runs 24\nexperiments and never answers a test correctly finishes at -24. The league\nranks by mean episode score.\n\n## Knowledge — the rivalrous half\n\nAt each prediction test, seat j with c_j correct answers earns\n`knowledgePool * c_j / sum(c)` (default pool $20.00 over 6 strips). Nobody\ncorrect pays nobody. Because it is a share, every rival you teach takes a\nslice of your own pool — which is exactly why publishing is not free.\n\n## Citation credit — the cooperative half\n\nFor each test strip x and each seat j that answered x CORRECTLY, let A(x, j)\nbe the set of seats a != j that authored a corkboard fact whose strip is at\nHamming distance exactly 1 from x (it differs in exactly one of the four\npositions) and that was published BEFORE this test opened. If A(x, j) is\nnon-empty, a pot of `citePot` (default $0.50) is split equally among its\nmembers. An author is paid at most once per (strip, confirmer) however many\nof its facts support x.\n\n**Citation rings do not pay.** Credit accrues only for a published result\nthat a DIFFERENT seat's passing prediction later confirms, on a strip nobody\nhas ever tested. Self-citation is impossible by construction, a duplicate\npublication has no author, and no arrangement between seats can manufacture a\ncorrect prediction about a strip the machine has never been shown.\n\n## The tuned ratio\n\nWith the defaults (experimentCost 1.0, knowledgePool 20.0, citePot 0.5,\ntestStrips 6, five seats, four tests):\n\n- teaching one rival one extra correct answer costs you roughly\n  `20/sum(c) - 20*c_you/sum(c)^2` — about $0.6 to $1.0 of pool share per test;\n- one well-placed publication sits one token away from up to 12 strips,\n  realistically supports one or two of the six test strips, is confirmed by\n  two to four rivals, and pays `0.5 x confirmers / authors` — about $0.5 to\n  $2.0 per test.\n\nSo publishing pays precisely when your result is informative to others AND\nnear the frontier. The knife edge is configuration, not code: the\n`open-science` variant raises citePot to $1.50 and the `closed-shop` variant\ndrops it to $0.10, so the league can watch the behaviour flip."
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "eleusis-player",
+      "name": "Eleusis Prompt Player",
+      "type": "player",
+      "description": "The reference Eleusis policy: delivers its PLAYER_PROMPT (or a default version-space strategy in words) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{ELEUSIS_IMAGE}}",
+      "run": [
+        "/bin/eleusis-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
+    },
+    {
+      "id": "eleusis-openbook",
+      "name": "Eleusis Open-Book Baseline",
+      "type": "player",
+      "description": "The scripted open-science baseline: keeps the version space of catalogue entries consistent with every fact it knows, spends on the strip that splits that space closest to in half, and PUBLISHES every result it holds. No LLM.",
+      "image": "{{ELEUSIS_IMAGE}}",
+      "run": [
+        "/bin/eleusis-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "openbook"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
+    },
+    {
+      "id": "eleusis-hoarder",
+      "name": "Eleusis Hoarder Baseline",
+      "type": "player",
+      "description": "The same version-space engine with the opposite disclosure policy: it reads the corkboard but never publishes anything of its own, so it earns no citation credit and teaches no rival. The control experiment for the publish-or-hoard dilemma.",
+      "image": "{{ELEUSIS_IMAGE}}",
+      "run": [
+        "/bin/eleusis-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "hoarder"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Standard laboratory",
+      "description": "Five cogs, 24 rounds, a prediction test every 6, citation pot $0.50.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          }
+        ],
+        "num_agents": 5,
+        "rounds": 24,
+        "testEvery": 6,
+        "testStrips": 6,
+        "experimentCost": 1.0,
+        "knowledgePool": 20.0,
+        "citePot": 0.5,
+        "minBatchSpacingMs": 12000,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "open-science",
+      "name": "Open science",
+      "description": "Citation credit tripled to $1.50: publishing should dominate.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          }
+        ],
+        "num_agents": 5,
+        "rounds": 24,
+        "testEvery": 6,
+        "testStrips": 6,
+        "experimentCost": 1.0,
+        "knowledgePool": 20.0,
+        "citePot": 1.5,
+        "minBatchSpacingMs": 12000,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "closed-shop",
+      "name": "Closed shop",
+      "description": "Citation credit cut to $0.10: hoarding should dominate.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          }
+        ],
+        "num_agents": 5,
+        "rounds": 24,
+        "testEvery": 6,
+        "testStrips": 6,
+        "experimentCost": 1.0,
+        "knowledgePool": 20.0,
+        "citePot": 0.1,
+        "minBatchSpacingMs": 12000,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        },
+        {
+          "name": "Bolt"
+        }
+      ],
+      "num_agents": 5,
+      "seed": 11,
+      "rounds": 6,
+      "testEvery": 3,
+      "testStrips": 6,
+      "turnDelayMs": 0,
+      "minBatchSpacingMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "eleusis-player"
+      },
+      {
+        "player_id": "eleusis-openbook"
+      },
+      {
+        "player_id": "eleusis-player"
+      },
+      {
+        "player_id": "eleusis-hoarder"
+      },
+      {
+        "player_id": "eleusis-player"
+      }
+    ]
+  }
+}

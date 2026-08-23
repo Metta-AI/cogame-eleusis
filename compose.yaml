@@ -1,0 +1,7 @@
+services:
+  eleusis:
+    image: coworld-eleusis:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host
