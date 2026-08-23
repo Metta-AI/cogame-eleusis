@@ -339,8 +339,18 @@ for key in ("names", "scores"):
         print(f"WARNING: results.json has no '{key}' key")
 
 reason = results.get("reason") or results.get("end_reason")
-if reason is not None:
-    print(f"episode end reason: {reason}")
+# FORK ADDITION (eleusis): the reason is asserted, not merely printed. Eleusis
+# declares exactly two legal endings -- complete (the test after the final
+# round settled) and deadline (the play clock stopped it between batches) --
+# and game.results_schema carries that same enum. An episode that ends any
+# other way, or writes no reason at all, is a broken episode that the starter's
+# print-only line would have let through green.
+if reason not in ("complete", "deadline"):
+    raise SystemExit(
+        f"episode end reason is {reason!r}, expected one of "
+        "'complete' or 'deadline' (results_schema's enum)"
+    )
+print(f"episode end reason: {reason}")
 
 replay_path = work / "replay.json"
 if not replay_path.exists() or replay_path.stat().st_size == 0:
