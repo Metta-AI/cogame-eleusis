@@ -636,13 +636,15 @@ proc settleTest*(sim: var Sim) =
     sim.openRound()
 
 proc capText(text: string, limit: int, oneLine = false): string =
-  ## Cut on a RUNE boundary: a byte slice through a multi-byte character
-  ## leaves invalid UTF-8 in the replay and breaks its strict JSON parse.
+  ## Cut on a RUNE boundary, with the cut marked, exactly as `cleanText` does
+  ## on the live LLM path: a byte slice through a multi-byte character leaves
+  ## invalid UTF-8 in the replay and breaks its strict JSON parse, and an
+  ## unmarked cut reads as a sentence the seat never finished writing.
   result = text.strip()
   if oneLine:
     result = result.replace("\n", " ").replace("\r", " ")
   if result.runeLen > limit:
-    result = result.runeSubStr(0, limit)
+    result = result.runeSubStr(0, limit - 1) & "…"
 
 proc recordTalk(sim: var Sim, seat: int, hypothesis, notes: string) =
   ## The hypothesis line is public and one line; the notes are private and

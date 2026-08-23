@@ -506,6 +506,14 @@ suite "text safety":
     sim.applyResearch(0, "RBGY", false, longLine, longNotes, true)
     check sim.seats[0].hypothesis.runeLen == MaxHypothesisLen
     check sim.seats[0].notes.runeLen == MaxNotesLen
+    ## The cut is marked, so a truncated line does not read as a sentence the
+    ## seat chose to stop writing.
+    check sim.seats[0].hypothesis.endsWith("…")
+    check sim.seats[0].notes.endsWith("…")
+    ## Text that fits is untouched, marker and all.
+    sim.applyResearch(1, "RRBG", false, "short line", "short note", true)
+    check sim.seats[1].hypothesis == "short line"
+    check sim.seats[1].notes == "short note"
     check sim.seats[0].hypothesis.validateUtf8() == -1
     check sim.seats[0].notes.validateUtf8() == -1
     ## A byte-boundary cut would land invalid UTF-8 in the replay bytes and
