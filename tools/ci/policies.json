@@ -1,0 +1,31 @@
+[
+  {
+    "name": "eleusis-empiricist",
+    "run": "/bin/eleusis-player",
+    "env": {
+      "PLAYER_PROMPT": "Treat the catalogue as a version space. Every turn, write in your notes the shortlist of catalogue entries still consistent with EVERY fact you know — your own results and the corkboard — and test the strip that would split that shortlist closest to in half. Publish a result when your shortlist is still long and the strip is far from anything on the board: early facts near unexplored strips earn citations for the rest of the game. Once your shortlist is down to two or three entries, hoard: you are about to out-score everyone on the test and you gain nothing by teaching them. Never re-publish something already on the board — it pays nothing."
+    }
+  },
+  {
+    "name": "eleusis-guarded",
+    "run": "/bin/eleusis-player",
+    "env": {
+      "PLAYER_PROMPT": "Play secretive but not blind. Assume rivals publish honestly, and mine the corkboard hard: cross off every catalogue entry it contradicts before you spend a dollar. Spend on strips whose verdict the corkboard cannot already imply, and hoard by default. Publish only a FAIL you are confident is uninformative to a rival's shortlist but sits one token from many untested strips — that buys citations without buying them a prize share. State a deliberately vague hypothesis line; it is public and non-binding."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "eleusis-openbook",
+    "run": "/bin/eleusis-player",
+    "env": {
+      "PLAYER_SCRIPTED": "openbook"
+    }
+  },
+  {
+    "name": "eleusis-hoarder",
+    "run": "/bin/eleusis-player",
+    "env": {
+      "PLAYER_SCRIPTED": "hoarder"
+    }
+  }
+]
