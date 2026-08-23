@@ -504,20 +504,30 @@ proc drawTest(sim: var Sim): tuple[strips: seq[string], truth: seq[Verdict]] =
     chosen.add(failPool[index])
   ## Degenerate top-up: only reachable if an episode has experimented on
   ## nearly a whole side of the universe. Never leave a test short — the
-  ## answer vector's length is part of the protocol.
+  ## answer vector's length is part of the protocol — and never repeat a
+  ## strip inside one test: the citation loop is keyed on the strip's index
+  ## in `test.strips`, so a repeat would pay one author twice for the same
+  ## (strip, confirmer) pair. Held-out strips first, exactly as the balanced
+  ## draw picks them.
   var spare: seq[string]
   for index in 0 ..< StripUniverse:
     let strip = stripOfIndex(index)
-    if strip notin chosen and strip notin sim.usedTest:
+    if strip notin chosen and strip notin sim.used and
+        strip notin sim.usedTest:
       spare.add(strip)
   sim.rng.shuffle(spare)
   var extra = 0
   while chosen.len < sim.config.testStrips and extra < spare.len:
     chosen.add(spare[extra])
     inc extra
+  ## Last resort, in universe order: any strip not already in this test. Only
+  ## once every one of the 256 has been offered does it start repeating, and
+  ## that needs testStrips > 256, which the config schema forbids.
   var index = 0
   while chosen.len < sim.config.testStrips:
-    chosen.add(stripOfIndex(index mod StripUniverse))
+    let strip = stripOfIndex(index mod StripUniverse)
+    if index >= StripUniverse or strip notin chosen:
+      chosen.add(strip)
     inc index
   sim.rng.shuffle(chosen)
   for strip in chosen:

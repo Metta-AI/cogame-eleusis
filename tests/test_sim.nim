@@ -210,6 +210,47 @@ suite "turn resolution":
         modes.add(event.mode)
     check modes == @["publish", "duplicate", "hoard"]
 
+  test "the degenerate top-up prefers held-out strips and never repeats one":
+    ## Both branches are unreachable with the shipped defaults, but a crafted
+    ## episode can exhaust one side of the universe. The test must still be
+    ## exactly testStrips entries long, must still prefer strips no
+    ## experiment has touched, and must never carry the same strip twice —
+    ## the citation loop is keyed on the strip's index in test.strips, so a
+    ## repeat would pay one author twice for the same (strip, confirmer).
+    var sim = initSim(fixtureConfig(rounds = 12, seed = 21, testEvery = 3))
+    ## Every PASS strip and all but eight FAIL strips are already used, so the
+    ## balanced draw comes up short and the top-up has to fill it.
+    var spared = 0
+    for index in 0 ..< StripUniverse:
+      let strip = stripOfIndex(index)
+      if evaluate(sim.rule, strip) == vFail and spared < 8:
+        inc spared
+        continue
+      sim.used.incl(strip)
+    check spared == 8
+    sim.openTest()
+    check sim.test.strips.len == sim.config.testStrips
+    var seen = initHashSet[string]()
+    for strip in sim.test.strips:
+      seen.incl(strip)
+      check strip notin sim.used     ## held-out strips were still available
+    check seen.len == sim.config.testStrips
+
+    ## Now the other branch: every strip but one has been used by an earlier
+    ## test, so even the spare pool is empty and the last resort fills the
+    ## test — without ever repeating the one strip already drawn.
+    var cornered = initSim(fixtureConfig(rounds = 12, seed = 21,
+      testEvery = 3))
+    for index in 1 ..< StripUniverse:
+      cornered.usedTest.incl(stripOfIndex(index))
+    cornered.openTest()
+    check cornered.test.strips.len == cornered.config.testStrips
+    var drawn = initHashSet[string]()
+    for index, strip in cornered.test.strips:
+      drawn.incl(strip)
+      check cornered.test.truth[index] == evaluate(cornered.rule, strip)
+    check drawn.len == cornered.config.testStrips
+
   test "the test draw is held out and balanced":
     var sim = initSim(fixtureConfig(rounds = 12, seed = 6, testEvery = 3))
     for round in 1 .. 3:
