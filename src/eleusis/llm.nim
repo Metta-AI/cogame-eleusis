@@ -57,7 +57,8 @@ type
     bedrockModels: seq[string]  ## candidates, tried in order on denial
     bedrockModel: int           ## index into bedrockModels
     bedrockToken: string
-    model: string
+    model: string         ## direct-Anthropic transport only; Bedrock
+                          ## picks from bedrockModels instead
     maxOutputTokens: int
     timeoutSeconds: int
     disabled*: bool   ## true once credentials are known-unavailable
@@ -93,6 +94,10 @@ proc bedrockModelIds(): seq[string] =
   ## `us.anthropic.claude-sonnet-4-6` is deliberately NOT a candidate: it
   ## times out on every sidecar call, and one throttle then cascades into
   ## scripted fallbacks (cogame-raid, 2026-08-23).
+  ## The config "model" field is NOT consulted here: it applies to
+  ## the direct-Anthropic transport only, and the haiku-first
+  ## ordering is a shared-capacity decision that trumps per-game
+  ## preference.
   let pinned = getEnv("BEDROCK_MODEL").strip()
   if pinned.len > 0:
     return @[pinned]
@@ -134,7 +139,9 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     result.bedrockModels = bedrockModelIds()
     result.bedrockToken = bedrockToken
     result.curl = newCurly()
-    echo "eleusis llm: bedrock transport, url ", result.bedrockUrl
+    echo "eleusis llm: bedrock transport, model ",
+      result.bedrockModels[result.bedrockModel],
+      ", url ", result.bedrockUrl
     return
   result.apiKey = resolveApiKey()
   if result.apiKey.len > 0:

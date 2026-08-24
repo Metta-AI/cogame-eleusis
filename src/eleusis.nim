@@ -42,6 +42,5 @@ when isMainModule:
     echo "eleusis: seats=", config.players.len,
       " rounds=", config.rounds,
       " testEvery=", config.testEvery,
-      " testStrips=", config.testStrips,
-      " model=", config.model
+      " testStrips=", config.testStrips
     runGameServer(config, runtimeConfig)
