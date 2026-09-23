@@ -40,6 +40,10 @@ def play(binary: Path, variant: str, teacher: bool) -> None:
                 "publish", "experiment", *(f"answer{i}" for i in range(6))
             ]
             assert [len(head["choices"]) for head in heads] == [2, 257, 2, 2, 2, 2, 2, 2]
+            for head in heads:
+                assert observation["action_schema"]["properties"][head["name"]]["enum"] == [
+                    choice for choice in head["choices"] if choice is not None
+                ]
             view = observation["semantic_view"]
             phases.add(view["phase"])
             assert "truth" not in view and "rule" not in view

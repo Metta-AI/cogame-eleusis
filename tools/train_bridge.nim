@@ -71,7 +71,11 @@ proc decision(view: Sim, seat, id: int): JsonNode =
   let actions = view.heads()
   var fields = newJObject()
   for head in actions:
-    fields[head["name"].getStr()] = %*{"enum": head["choices"]}
+    var legal = newJArray()
+    for choice in head["choices"]:
+      if choice.kind != JNull:
+        legal.add(choice)
+    fields[head["name"].getStr()] = %*{"enum": legal}
   %*{
     "kind": "decision", "game": "eleusis", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": view.round,
