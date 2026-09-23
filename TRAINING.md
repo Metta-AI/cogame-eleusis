@@ -1,4 +1,23 @@
-# Metta post-training data
+# Training
+
+All three certified variants also expose a persistent numeric bridge for
+Metta RL and native PufferLib:
+
+```sh
+nim c -d:release --path:src -o:/tmp/eleusis-train-bridge tools/train_bridge.nim
+python3 tools/test_train_bridge.py /tmp/eleusis-train-bridge
+```
+
+Pass the binary, manifest, and variant to Metta's
+`recipes.external.coworld_metta_rl.train` or `recipes.external.coworld.train`.
+Use `players=5` and a finite `total_timesteps`. The bridge has 895 numeric
+features and eight action heads: publication, one of 256 experiments or skip,
+and six test answers. Heads irrelevant to the current phase are masked.
+It exposes public facts and each seat's own experiments, without the hidden
+rule or test answers. Every seat in a research or test batch observes the
+same pre-batch state, matching the hosted simultaneous decision path.
+
+## Metta post-training data
 
 The native simulator and published `openbook` and `hoarder` policies export
 supervised examples for all three certified Eleusis variants:
