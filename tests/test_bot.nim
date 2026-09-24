@@ -124,15 +124,24 @@ suite "scripted baselines":
       for fact in sim.seats[seat].log:
         check fact.mode in ["publish", "duplicate", ""]
 
+  test "free riders use the public board without buying experiments":
+    let sim = playScripted(fixture(5, rounds = 12, testEvery = 4),
+      [skFreerider, skOpenbook, skOpenbook, skOpenbook, skOpenbook])
+    check sim.seats[0].experiments == 0
+    check sim.seats[0].spend == 0
+    check sim.seats[0].answered == 3 * sim.config.testStrips
+
   test "decideAll falls back to scripted with no credentials":
     let config = fixture(3, rounds = 8, testEvery = 4)
     let client = newLlmClient(config)
+    client.disabled = true
     check client.disabled
     var sim = initSim(config)
     let seats = sim.pendingSeats()
     let decisions = client.decideAll(sim, seats,
       @["be bold", "", "", "", ""],
-      @[skNone, skNone, skHoarder, skNone, skOpenbook])
+      @[skNone, skNone, skHoarder, skNone, skOpenbook],
+      @[false, false, false, false, false])
     check decisions.len == Seats
     for index, seat in seats:
       let kind = if seat == 2: skHoarder else: skOpenbook
@@ -141,6 +150,50 @@ suite "scripted baselines":
       sim.applyResearch(seat, decisions[index].strip, decisions[index].publish,
         decisions[index].hypothesis, decisions[index].notes, true)
     check sim.round == 2
+
+  test "Jev applies probability maxima to experiments, disclosure, and tests":
+    var sim = initSim(fixture(7, rounds = 8, testEvery = 4))
+    let research = sim.jevQuestions(0)
+    check research["experiment"]["criteria"].len == 13
+    var strip = ""
+    for name, _ in research["experiment"]["criteria"].pairs:
+      if name != "skip":
+        strip = name
+        break
+    var researchProbabilities = newJObject()
+    for name, _ in research["experiment"]["criteria"].pairs:
+      researchProbabilities[name] = %(if name == strip: 1.0 else: 0.0)
+    let researchPayload = %*{"answers": {"experiment": {
+      "type": "choice", "choice": "skip", "confidence": 0.5,
+      "probabilities": researchProbabilities}},
+      "model": "jev-latest", "usage": {"input_tokens": 1,
+      "output_tokens": 1}}
+    check sim.jevDecision(0, researchPayload, research).strip == strip
+    researchPayload["answers"]["experiment"]["probabilities"]["bad"] = %0.0
+    expect EleusisError:
+      discard sim.jevDecision(0, researchPayload, research)
+
+    while sim.phase != phTest:
+      for seat in sim.pendingSeats():
+        let decision = scriptedAction(sim, seat, skOpenbook)
+        sim.applyResearch(seat, decision.strip, decision.publish,
+          decision.hypothesis, decision.notes, true)
+    let questions = sim.jevQuestions(0)
+    check questions.len == sim.config.testStrips + 1
+    var answers = newJObject()
+    for name, question in questions.pairs:
+      let choice = if name == "publish": "hoard" else: "pass"
+      var probabilities = newJObject()
+      for option, _ in question["criteria"].pairs:
+        probabilities[option] = %(if option == choice: 1.0 else: 0.0)
+      answers[name] = %*{"type": "choice", "choice": choice,
+        "confidence": 0.5, "probabilities": probabilities}
+    let payload = %*{"answers": answers, "model": "jev-latest",
+      "usage": {"input_tokens": 1, "output_tokens": 1}}
+    let decision = sim.jevDecision(0, payload, questions)
+    check decision.answers.len == sim.config.testStrips
+    check decision.answers[0] == vPass
+    check not decision.publish
 
   test "a slot that never delivered a prompt plays openbook, not an LLM call":
     ## The reference player always delivers a prompt (its own default strategy
@@ -154,7 +207,8 @@ suite "scripted baselines":
     var sim = initSim(config)
     let seats = sim.pendingSeats()
     let decisions = client.decideAll(sim, seats,
-      @["", "  ", "", "", ""], @[skNone, skNone, skNone, skNone, skNone])
+      @["", "  ", "", "", ""], @[skNone, skNone, skNone, skNone, skNone],
+      @[false, false, false, false, false])
     check decisions.len == Seats
     for index, seat in seats:
       ## No request was ever built, so nothing failed and nothing fell back.
@@ -210,6 +264,7 @@ suite "scripted baselines":
     check parseScriptKind("1") == skOpenbook
     check parseScriptKind("openbook") == skOpenbook
     check parseScriptKind("hoarder") == skHoarder
+    check parseScriptKind("freerider") == skFreerider
     check parseScriptKind("") == skNone
     let extracted = extractJsonObject("prose {\"experiment\": \"RBGY\"} tail")
     check extracted{"experiment"}.getStr() == "RBGY"

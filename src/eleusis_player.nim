@@ -36,18 +36,21 @@ when isMainModule:
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
-  if prompt.len == 0:
+  let jev = getEnv("PLAYER_JEV") == "1"
+  if prompt.len == 0 and not jev:
     prompt = DefaultPrompt
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted,
+      "jev": jev}
 
   echo "eleusis player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "eleusis player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
+    (if scripted.len > 0: ", scripted " & scripted else: ""),
+    (if jev: ", Jev choices" else: ""), ")"
 
   ## whisky's receiveMessage RAISES on a close frame or a truncated read
   ## (only a timeout returns none), and mummy's send only queues - so the

@@ -45,6 +45,7 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
+    jev: seq[bool]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -298,6 +299,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seats: seq[int]
       var prompts: seq[string]
       var scripted: seq[ScriptKind]
+      var jev: seq[bool]
       var testing = false
       withLock stateLock:
         if state.sim.done:
@@ -316,6 +318,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripted = state.scripted
+        jev = state.jev
         testing = state.sim.phase == phTest
         echo "eleusis: ",
           (if testing: "prediction test " & $state.sim.test.index
@@ -326,7 +329,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, ONE parallel batch for all five seats) runs
       ## outside the lock on a snapshot; only this thread mutates the sim, so
       ## the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      let decisions = client.decideAll(simCopy, seats, prompts, scripted, jev)
 
       withLock stateLock:
         for index, seat in seats:
@@ -334,7 +337,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           ## A decision the LLM never delivered is a scripted move, and it is
           ## recorded as one: `scripted` true and `fallback` true on the event.
           let wasScripted =
-            client.playsScripted(prompts[seat], scripted[seat]) or
+            client.playsScripted(prompts[seat], scripted[seat], jev[seat]) or
             decision.fallback
           try:
             if testing:
@@ -500,6 +503,7 @@ proc websocketHandler(
           if prompt.runeLen > MaxPromptLen:
             prompt = prompt.runeSubStr(0, MaxPromptLen)
           let node = payload{"scripted"}
+          let jev = payload{"jev"}.getBool(false)
           let scripted =
             if node.isNil: skNone
             elif node.kind == JBool: (if node.getBool(): skOpenbook
@@ -508,6 +512,7 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.jev[slot] = jev
           echo "eleusis: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
@@ -588,6 +593,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
+  state.jev = newSeq[bool](config.players.len)
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)

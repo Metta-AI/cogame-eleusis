@@ -35,6 +35,7 @@ type
     skNone = "none"
     skOpenbook = "openbook"
     skHoarder = "hoarder"
+    skFreerider = "freerider"
 
   Decision* = object
     strip*: string          ## "" = skip (no experiment, no cost)
@@ -57,6 +58,9 @@ type
     bedrockModels: seq[string]  ## candidates, tried in order on denial
     bedrockModel: int           ## index into bedrockModels
     bedrockToken: string
+    jevEndpoint: string
+    jevKey: string
+    jevModel: string
     model: string         ## direct-Anthropic transport only; Bedrock
                           ## picks from bedrockModels instead
     maxOutputTokens: int
@@ -70,6 +74,7 @@ proc parseScriptKind*(text: string): ScriptKind =
   case text.strip().toLowerAscii()
   of "1", "true", "yes", "openbook", "open-book", "open": skOpenbook
   of "hoarder", "hoard", "secretive": skHoarder
+  of "freerider", "free-rider", "free": skFreerider
   else: skNone
 
 proc resolveApiKey(): string =
@@ -127,6 +132,24 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     timeoutSeconds: config.llmTimeoutSeconds
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
+  let captureUrl = getEnv("METTA_CAPTURE_URL").strip()
+  let typesafeKey = getEnv("TYPESAFE_API_KEY").strip()
+  if captureUrl.len > 0:
+    result.jevEndpoint = captureUrl.strip(chars = {'/'}, leading = false)
+    result.jevKey = getEnv("METTA_CAPTURE_KEY").strip()
+    if result.jevKey.len == 0:
+      raise newException(EleusisError, "METTA_CAPTURE_KEY is required")
+    result.jevModel = getEnv("METTA_CAPTURE_MODEL", "typesafe/jev-1.13")
+  elif bedrockEndpoint.len > 0:
+    result.jevEndpoint = bedrockEndpoint.strip(chars = {'/'}, leading = false)
+    result.jevModel = "typesafe/jev-1.13"
+  elif typesafeKey.len > 0:
+    result.jevEndpoint = getEnv("TYPESAFE_BASE_URL", "https://api.typesafe.ai")
+      .strip(chars = {'/'}, leading = false)
+    result.jevKey = typesafeKey
+    result.jevModel = getEnv("TYPESAFE_DEFAULT_MODEL", "jev-latest")
+  if result.jevEndpoint.len > 0:
+    result.curl = newCurly()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
     let region = getEnv("AWS_REGION",
@@ -207,15 +230,112 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
   result.hypothesis =
     if consistent.len > 0: describeRule(consistent[0])
     else: "no consistent rule"
-  result.publish = kind != skHoarder
+  result.publish = kind == skOpenbook
   if sim.phase == phTest:
     for strip in sim.test.strips:
       result.answers.add(predict(consistent, strip))
   else:
+    if kind != skFreerider:
+      var known = initHashSet[string]()
+      for fact in facts:
+        known.incl(fact.strip)
+      result.strip = chooseStrip(sim, seat, consistent, known)
+
+proc jevQuestions*(sim: Sim, seat: int): JsonNode =
+  ## Keep the experiment menu below SystemOne's 255-choice limit while
+  ## retaining the highest-information strips from the public catalogue.
+  result = newJObject()
+  if sim.phase == phResearch:
+    let facts = sim.knownFacts(seat)
+    let consistent = consistentRules(facts)
     var known = initHashSet[string]()
     for fact in facts:
       known.incl(fact.strip)
-    result.strip = chooseStrip(sim, seat, consistent, known)
+    var candidates: seq[tuple[gap: int, strip: string]]
+    for index in sweepOrder(sim.config.seed, seat):
+      let strip = stripOfIndex(index)
+      if strip in known:
+        continue
+      let gap = abs(2 * splitCount(consistent, strip) - consistent.len)
+      var position = 0
+      while position < candidates.len and candidates[position].gap <= gap:
+        inc position
+      candidates.insert((gap, strip), position)
+      if candidates.len > 12:
+        candidates.setLen(12)
+    var criteria = newJObject()
+    criteria["skip"] = %"Run no experiment and pay nothing"
+    for candidate in candidates:
+      criteria[candidate.strip] = %("Test " & candidate.strip &
+        "; splits " & $consistent.len & " surviving rules with gap " &
+        $candidate.gap)
+    result["experiment"] = %*{
+      "type": "choice",
+      "instructions": "Choose the experiment that best improves your eventual prize and citation income, after its cost. You may skip.",
+      "criteria": criteria
+    }
+  else:
+    for index, strip in sim.test.strips:
+      result["answer_" & $index] = %*{
+        "type": "choice",
+        "instructions": "Predict whether this previously untested strip passes the hidden rule. The test has exactly half PASS results overall.",
+        "criteria": {"pass": "The machine accepts " & strip,
+          "fail": "The machine rejects " & strip}
+      }
+  if sim.seats[seat].pending.isSome:
+    result["publish"] = %*{
+      "type": "choice",
+      "instructions": "Decide whether to publish your pending result for possible citation credit or hoard it to protect your prediction-prize share.",
+      "criteria": {"publish": "Share the result with all rivals",
+        "hoard": "Keep the result private"}
+    }
+
+proc jevChoice(payload, questions: JsonNode, name: string): string =
+  let criteria = questions[name]["criteria"]
+  let answer = payload["answers"][name]
+  let probabilities = answer["probabilities"]
+  let reported = answer["choice"].getStr()
+  if answer["type"].getStr() != "choice" or
+      not criteria.hasKey(reported) or probabilities.len != criteria.len:
+    raise newException(EleusisError, "Jev returned the wrong choice set")
+  let confidence = answer["confidence"].getFloat()
+  if confidence < 0 or confidence > 1:
+    raise newException(EleusisError, "Jev confidence is outside [0, 1]")
+  var total = 0.0
+  var best = -1.0
+  for choice, probability in probabilities.pairs:
+    if not criteria.hasKey(choice):
+      raise newException(EleusisError, "Jev returned an unknown choice")
+    let value = probability.getFloat()
+    if value < 0 or value > 1:
+      raise newException(EleusisError, "Jev probability is outside [0, 1]")
+    total += value
+    if value > best:
+      best = value
+      result = choice
+  if abs(total - 1) > probabilities.len.float * 0.005 + 1e-6:
+    raise newException(EleusisError, "Jev probabilities do not sum to one")
+
+proc jevDecision*(sim: Sim, seat: int, payload, questions: JsonNode):
+    Decision =
+  let consistent = consistentRules(sim.knownFacts(seat))
+  result.hypothesis =
+    if consistent.len > 0: describeRule(consistent[0])
+    else: "no consistent rule"
+  if sim.phase == phResearch:
+    let choice = jevChoice(payload, questions, "experiment")
+    result.strip = if choice == "skip": "" else: choice
+  else:
+    for index in 0 ..< sim.config.testStrips:
+      let choice = jevChoice(payload, questions, "answer_" & $index)
+      result.answers.add(if choice == "pass": vPass else: vFail)
+  if questions.hasKey("publish"):
+    result.publish = jevChoice(payload, questions, "publish") == "publish"
+  echo "eleusis jev: seat ", seat, " experiment ", result.strip,
+    " publish ", result.publish,
+    " model ", payload{"model"}.getStr(),
+    " input_tokens ", payload["usage"]{"input_tokens"}.getInt(),
+    " output_tokens ", payload["usage"]{"output_tokens"}.getInt()
 
 # ---- Prompt building --------------------------------------------------------
 
@@ -457,6 +577,9 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
     raise newException(EleusisError, "anthropic error " & $response.code &
       ": " & response.body[0 .. min(response.body.high, 300)])
   let payload = parseJson(response.body)
+  echo "eleusis llm: model ", payload{"model"}.getStr(),
+    " input_tokens ", payload["usage"]{"input_tokens"}.getInt(),
+    " output_tokens ", payload["usage"]{"output_tokens"}.getInt()
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(EleusisError, "anthropic refusal")
   for contentBlock in payload["content"]:
@@ -531,21 +654,24 @@ proc parseDecision*(payload: JsonNode, testStrips: int, testing: bool):
     result.strip = normaliseStrip(node.getStr())
 
 proc playsScripted*(client: LlmClient, prompt: string,
-    kind: ScriptKind): bool =
+    kind: ScriptKind, jev: bool): bool =
   ## A seat plays a built-in baseline instead of Claude when it registered as
   ## scripted, when there are no credentials at all, or when it has never
   ## delivered a prompt — the reference player always sends one (its own
   ## default strategy when `PLAYER_PROMPT` is empty), so an empty prompt means
   ## the pod never connected inside `playerConnectTimeoutSeconds`. Such a slot
   ## plays `openbook` rather than an LLM call with no operator guidance.
-  kind != skNone or client.disabled or prompt.strip().len == 0
+  kind != skNone or
+    (if jev: client.jevEndpoint.len == 0
+     else: client.disabled or prompt.strip().len == 0)
 
 proc decideAll*(
   client: LlmClient,
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  jev: seq[bool]
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order — all of them as ONE parallel
   ## batch, because every seat decides simultaneously by rule. Never raises:
@@ -556,17 +682,44 @@ proc decideAll*(
   var open: seq[int]     ## indexes into `seats` still undecided
   for index, seat in seats:
     let kind = scripted[seat]
-    if client.playsScripted(prompts[seat], kind):
+    if client.playsScripted(prompts[seat], kind, jev[seat]):
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skOpenbook else: kind))
     else:
       open.add(index)
   for attempt in 0 .. 1:
-    if open.len == 0 or client.disabled:
+    if open.len == 0:
+      break
+    if client.disabled:
+      var enabled: seq[int]
+      for index in open:
+        if jev[seats[index]]:
+          enabled.add(index)
+        else:
+          result[index] = scriptedAction(sim, seats[index], skOpenbook)
+          result[index].fallback = true
+      open = enabled
+    if open.len == 0:
       break
     var batch: RequestBatch
     for index in open:
       let seat = seats[index]
+      if jev[seat]:
+        var headers: HttpHeaders
+        headers["content-type"] = "application/json"
+        if client.jevKey.len > 0:
+          headers["authorization"] = "Bearer " & client.jevKey
+        else:
+          headers["x-coworld-player-slot"] = $seat
+        let body = %*{
+          "model": client.jevModel,
+          "state": sim.systemPrompt(seat) & "\n\n" &
+            sim.userPrompt(seat, prompts[seat]),
+          "questions": sim.jevQuestions(seat)
+        }
+        batch.post(client.jevEndpoint & "/v1/systemone", headers,
+          $body, $index)
+        continue
       var user = sim.userPrompt(seat, prompts[seat])
       if attempt > 0:
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
@@ -578,10 +731,20 @@ proc decideAll*(
     for position, index in open:
       let seat = seats[index]
       try:
-        let text = client.textOf(responses[position].response,
-          responses[position].error, batch[position].url)
-        let decision = parseDecision(extractJsonObject(text),
-          sim.config.testStrips, testing)
+        var decision: Decision
+        if jev[seat]:
+          let response = responses[position].response
+          let error = responses[position].error
+          if error.len > 0 or response.code < 200 or response.code >= 300:
+            raise newException(EleusisError, "Jev transport failed: " &
+              error & " HTTP " & $response.code)
+          decision = sim.jevDecision(seat, parseJson(response.body),
+            sim.jevQuestions(seat))
+        else:
+          let modelText = client.textOf(responses[position].response,
+            responses[position].error, batch[position].url)
+          decision = parseDecision(extractJsonObject(modelText),
+            sim.config.testStrips, testing)
         ## Reject illegal replies HERE so the retry carries the hint and an
         ## illegal move never reaches the real sim.
         var probe = sim
