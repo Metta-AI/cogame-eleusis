@@ -613,7 +613,7 @@
     },
     "players": [
       {
-        "player_id": "eleusis-jev"
+        "player_id": "eleusis-player"
       },
       {
         "player_id": "eleusis-openbook"
@@ -625,7 +625,7 @@
         "player_id": "eleusis-hoarder"
       },
       {
-        "player_id": "eleusis-freerider"
+        "player_id": "eleusis-player"
       }
     ]
   }
