@@ -336,7 +336,7 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "eleusis.player.v2 - JSON text frames over COWORLD_PLAYER_WS_URL. The game sends welcome, seat-private state, and final frames. The state includes own and public facts, the static strip catalogue, pending result, and the public test strips, while hiding the rule and other seats private results. Prompt or scripted policies register with {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str}. External policies register with {\"type\":\"register\",\"control\":\"external\"}. Each pending external seat receives {\"type\":\"observation\",\"id\":int,\"observation\":<seat-private state>} and returns {\"type\":\"action\",\"id\":int,\"action\":<research or prediction action>}. The game validates strip syntax, publication, answer count, and turn phase. It owns hidden state, rules, results, and replay. PLAYER_JEV=1 ranks actions inside the player. Without model transport it registers openbook baseline play."
+        "value": "eleusis.player.v2 - JSON text frames over COWORLD_PLAYER_WS_URL. The game sends welcome, seat-private state, and final frames. The state includes own and public facts, the static strip catalogue, pending result, and the public test strips, while hiding the rule and other seats private results. Prompt or scripted policies register with {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str}. External policies register with {\"type\":\"register\",\"control\":\"external\"}. Each pending external seat receives {\"type\":\"observation\",\"id\":int,\"observation\":<seat-private state>} and returns {\"type\":\"action\",\"id\":int,\"action\":<research or prediction action>}. The game validates strip syntax, publication, answer count, and turn phase. It owns hidden state, rules, results, and replay."
       },
       "global": {
         "type": "text",
@@ -369,29 +369,6 @@
     }
   },
   "player": [
-    {
-      "id": "eleusis-jev",
-      "name": "Eleusis Jev Choice Player",
-      "type": "player",
-      "description": "Chooses an experiment from high-information candidates, decides whether to publish a pending result, and predicts every test strip with Jev SystemOne.",
-      "image": "{{ELEUSIS_IMAGE}}",
-      "run": [
-        "/bin/eleusis-player"
-      ],
-      "env": {
-        "PLAYER_JEV": "1"
-      },
-      "resources": {
-        "requests": {
-          "cpu": "100m",
-          "memory": "64Mi"
-        },
-        "limits": {
-          "cpu": "1"
-        }
-      },
-      "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
-    },
     {
       "id": "eleusis-player",
       "name": "Eleusis Prompt Player",
