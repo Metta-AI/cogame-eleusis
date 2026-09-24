@@ -40,12 +40,11 @@ rings do not pay**: credit needs a *rival* to be actually right about a strip
 nobody has tested, self-citation is impossible by construction, and a
 duplicate publication has no author.
 
-**The game supports prompt, Jev, and scripted policies.** Every turn the game
-server sends each seat's policy prompt, its own experiment log, the corkboard,
-the public scoreboard, the per-test scores and its private notes to the
-selected model path. All five seats decide in **one parallel batch** because
-their decisions are simultaneous. Player containers deliver their policy
-choice over the websocket. Three built-in **scripted baselines** share one
+**The game supports prompt, Jev, and scripted policies.** Each external player
+receives its own facts, the public corkboard, the static strip catalogue, and
+the current test strips. It returns an ordinary research or prediction action.
+The game validates and applies all five simultaneous decisions. Prompt policies
+still use the game's Claude adapter. Three built-in **scripted baselines** share one
 version-space engine: `openbook` publishes every result, `hoarder` publishes
 none, and `freerider` runs no experiments. They
 play any seat that registers as scripted, and every seat when no LLM
@@ -56,12 +55,12 @@ The `freerider` baseline runs no experiments and predicts from the shared
 corkboard. Compare Jev against it when a short episode rewards avoiding
 experiment costs.
 
-`PLAYER_JEV=1` lets Jev choose whether to publish, which of 12 high-information
-candidate strips to test (or skip), and every prediction-test answer. The
-candidate menu uses the same public rule catalogue and private known facts as
-the baselines. Jev's public hypothesis is a factual version-space template;
-it does not generate new text or private notes. Hosted play uses the Bedrock
-sidecar; local play can use `TYPESAFE_API_KEY` in the game server environment.
+`PLAYER_JEV=1` lets the player ask Jev whether to publish, which of 12
+unobserved catalogue strips to test (or skip), and every prediction-test
+answer. It uses only the private facts and public catalogue in its observation.
+Hosted play uses the Bedrock sidecar; direct local play uses `TYPESAFE_API_KEY`
+in the player environment. Earlier paired results used the superseded
+server-side Jev path and are historical integration data.
 
 Seats play under **anonymous cog aliases** (Sprocket, Gizmo, …): policy
 display names never reach the agents' prompts, so nobody can meta-game "that
@@ -84,8 +83,8 @@ already settled keep their money.
 - `src/eleusis/llm.nim` — Claude client (one parallel batch per turn) + the
   version-space scripted baselines
 - `src/eleusis/server.nim` — mummy HTTP/WS server (player, global, replay)
-- `src/eleusis_player.nim` — the prompt-delivery player (`PLAYER_PROMPT` /
-  `PLAYER_SCRIPTED` env)
+- `src/eleusis_player.nim` — prompt, scripted, or external-action player
+- `src/eleusis/jev_policy.nim` — player-side System One action ranking
 - `client/` — shared canvas renderer + global/player/replay pages (the parley
   broadcast chrome around the lab bench)
 - `replay-viewer/` — static wasm replay viewer (`?replay=<url>`)

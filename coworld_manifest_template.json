@@ -336,7 +336,7 @@
     "protocols": {
       "player": {
         "type": "text",
-        "value": "eleusis.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). An Eleusis policy is a prompt: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's own experiment log, the corkboard, the scoreboard, the test results and its private notes to Claude once a turn, all five seats as one parallel batch. game->player frames: {\"type\":\"welcome\",\"protocol\":\"eleusis.player.v1\",\"slot\":N,\"name\":str,\"rounds\":int,\"testEvery\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":str,\"round\":int,\"rounds\":int,\"phase\":\"research|test|done\",\"score\":float,\"knowledge\":float,\"credit\":float,\"spend\":float,\"experiments\":int,\"published\":int,\"hoarded\":int,\"correct\":int,\"answered\":int,\"pending\":{\"strip\":str,\"verdict\":\"pass|fail\"}|null,\"boardSize\":int,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED to the seat's own numbers, because the game is hidden-information: it never carries the rule, the test truth, another seat's drawer or another seat's notes (decisions are server-side, so the redaction loses the policy nothing); {\"type\":\"final\",\"done\":true,\"scores\":[5],\"names\":[5 aliases],\"rule\":str,\"closest\":int,\"reason\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes) is the policy, sent right after connecting and again after welcome; scripted \"openbook\" (or \"1\") plays the built-in publish-everything baseline for that seat, \"hoarder\" the publish-nothing one, \"\" means LLM-driven. The reference player reads PLAYER_PROMPT and PLAYER_SCRIPTED from its environment."
+        "value": "eleusis.player.v2 - JSON text frames over COWORLD_PLAYER_WS_URL. The game sends welcome, seat-private state, and final frames. The state includes own and public facts, the static strip catalogue, pending result, and the public test strips, while hiding the rule and other seats private results. Prompt or scripted policies register with {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str}. External policies register with {\"type\":\"register\",\"control\":\"external\"}. Each pending external seat receives {\"type\":\"observation\",\"id\":int,\"observation\":<seat-private state>} and returns {\"type\":\"action\",\"id\":int,\"action\":<research or prediction action>}. The game validates strip syntax, publication, answer count, and turn phase. It owns hidden state, rules, results, and replay. PLAYER_JEV=1 ranks actions inside the player. Without model transport it registers openbook baseline play."
       },
       "global": {
         "type": "text",
@@ -375,11 +375,20 @@
       "type": "player",
       "description": "Chooses an experiment from high-information candidates, decides whether to publish a pending result, and predicts every test strip with Jev SystemOne.",
       "image": "{{ELEUSIS_IMAGE}}",
-      "run": ["/bin/eleusis-player"],
-      "env": {"PLAYER_JEV": "1"},
+      "run": [
+        "/bin/eleusis-player"
+      ],
+      "env": {
+        "PLAYER_JEV": "1"
+      },
       "resources": {
-        "requests": {"cpu": "100m", "memory": "64Mi"},
-        "limits": {"cpu": "1"}
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
       },
       "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
     },
@@ -432,11 +441,20 @@
       "type": "player",
       "description": "A zero-experiment baseline that predicts from the public corkboard without paying to run the machine or publishing results.",
       "image": "{{ELEUSIS_IMAGE}}",
-      "run": ["/bin/eleusis-player"],
-      "env": {"PLAYER_SCRIPTED": "freerider"},
+      "run": [
+        "/bin/eleusis-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "freerider"
+      },
       "resources": {
-        "requests": {"cpu": "100m", "memory": "64Mi"},
-        "limits": {"cpu": "1"}
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
       },
       "source_url": "https://github.com/Metta-AI/cogame-eleusis/tree/main"
     },
