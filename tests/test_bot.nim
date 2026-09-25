@@ -124,9 +124,17 @@ suite "scripted baselines":
       for fact in sim.seats[seat].log:
         check fact.mode in ["publish", "duplicate", ""]
 
+  test "free riders use the public board without buying experiments":
+    let sim = playScripted(fixture(5, rounds = 12, testEvery = 4),
+      [skFreerider, skOpenbook, skOpenbook, skOpenbook, skOpenbook])
+    check sim.seats[0].experiments == 0
+    check sim.seats[0].spend == 0
+    check sim.seats[0].answered == 3 * sim.config.testStrips
+
   test "decideAll falls back to scripted with no credentials":
     let config = fixture(3, rounds = 8, testEvery = 4)
     let client = newLlmClient(config)
+    client.disabled = true
     check client.disabled
     var sim = initSim(config)
     let seats = sim.pendingSeats()
@@ -210,6 +218,7 @@ suite "scripted baselines":
     check parseScriptKind("1") == skOpenbook
     check parseScriptKind("openbook") == skOpenbook
     check parseScriptKind("hoarder") == skHoarder
+    check parseScriptKind("freerider") == skFreerider
     check parseScriptKind("") == skNone
     let extracted = extractJsonObject("prose {\"experiment\": \"RBGY\"} tail")
     check extracted{"experiment"}.getStr() == "RBGY"

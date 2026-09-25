@@ -35,6 +35,7 @@ type
     skNone = "none"
     skOpenbook = "openbook"
     skHoarder = "hoarder"
+    skFreerider = "freerider"
 
   Decision* = object
     strip*: string          ## "" = skip (no experiment, no cost)
@@ -70,6 +71,7 @@ proc parseScriptKind*(text: string): ScriptKind =
   case text.strip().toLowerAscii()
   of "1", "true", "yes", "openbook", "open-book", "open": skOpenbook
   of "hoarder", "hoard", "secretive": skHoarder
+  of "freerider", "free-rider", "free": skFreerider
   else: skNone
 
 proc resolveApiKey(): string =
@@ -207,15 +209,16 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
   result.hypothesis =
     if consistent.len > 0: describeRule(consistent[0])
     else: "no consistent rule"
-  result.publish = kind != skHoarder
+  result.publish = kind == skOpenbook
   if sim.phase == phTest:
     for strip in sim.test.strips:
       result.answers.add(predict(consistent, strip))
   else:
-    var known = initHashSet[string]()
-    for fact in facts:
-      known.incl(fact.strip)
-    result.strip = chooseStrip(sim, seat, consistent, known)
+    if kind != skFreerider:
+      var known = initHashSet[string]()
+      for fact in facts:
+        known.incl(fact.strip)
+      result.strip = chooseStrip(sim, seat, consistent, known)
 
 # ---- Prompt building --------------------------------------------------------
 

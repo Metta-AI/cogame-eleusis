@@ -12,7 +12,7 @@
 ##   WS  /global                     - spectator snapshots
 ##   WS  /replay                     - replay payload (replay mode)
 ##
-## Player protocol (eleusis.player.v1), all JSON text frames:
+## Player protocol (eleusis.player.v2), all JSON text frames:
 ##   game -> player: {"type":"welcome","slot":N,"name":...,"rounds":R,...}
 ##                   {"type":"state",...} after every event, REDACTED to the
 ##                   seat's own numbers (the rule, the test truth, other
@@ -21,6 +21,10 @@
 ##   player -> game: {"type":"prompt","prompt":"...","scripted":"openbook"}
 ##                   (max 4000 runes; scripted plays a built-in baseline for
 ##                   that seat: "openbook" / "1", or "hoarder")
+##   player -> game: {"type":"register","control":"external"}
+##   game -> external player: {"type":"observation","id":N,
+##                   "observation":<seat-private state and action inputs>}
+##   external player -> game: {"type":"action","id":N,"action":{...}}
 
 import
   std/[json, locks, options, os, sets, strutils, tables, times, unicode],
@@ -45,6 +49,9 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
+    external: seq[bool]
+    decisionId: int
+    pendingActions: seq[JsonNode]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -106,6 +113,16 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
   if seat.pending.isSome:
     let held = seat.pending.get()
     pending = %*{"strip": held.strip, "verdict": $held.verdict}
+  var facts = newJArray()
+  for fact in gs.sim.knownFacts(slot):
+    facts.add(%*{"strip": fact.strip, "verdict": $fact.verdict})
+  var catalogue = newJArray()
+  for index in 0 ..< StripUniverse:
+    catalogue.add(%stripOfIndex(index))
+  var testStrips = newJArray()
+  if gs.sim.phase == phTest:
+    for strip in gs.sim.test.strips:
+      testStrips.add(%strip)
   %*{
     "type": "state",
     "slot": slot,
@@ -123,6 +140,9 @@ proc playerStateJson(gs: GameState, slot: int): JsonNode =
     "correct": seat.correct,
     "answered": seat.answered,
     "pending": pending,
+    "facts": facts,
+    "catalogue": catalogue,
+    "testStrips": testStrips,
     "boardSize": gs.sim.board.len,
     "started": gs.started,
     "done": gs.sim.done,
@@ -298,6 +318,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seats: seq[int]
       var prompts: seq[string]
       var scripted: seq[ScriptKind]
+      var external: seq[bool]
+      var decisionId: int
       var testing = false
       withLock stateLock:
         if state.sim.done:
@@ -316,6 +338,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripted = state.scripted
+        external = state.external
+        inc state.decisionId
+        decisionId = state.decisionId
+        state.pendingActions = newSeq[JsonNode](config.players.len)
+        for seat in seats:
+          if external[seat] and state.playerSockets.hasKey(seat):
+            state.playerSockets[seat].send($ %*{
+              "type": "observation", "id": decisionId,
+              "observation": state.playerStateJson(seat)})
         testing = state.sim.phase == phTest
         echo "eleusis: ",
           (if testing: "prediction test " & $state.sim.test.index
@@ -326,7 +357,32 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, ONE parallel batch for all five seats) runs
       ## outside the lock on a snapshot; only this thread mutates the sim, so
       ## the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      var modelKinds = newSeq[ScriptKind](scripted.len)
+      for seat in 0 ..< scripted.len:
+        modelKinds[seat] = scripted[seat]
+      for seat in seats:
+        if external[seat]:
+          modelKinds[seat] = skOpenbook
+      var decisions = client.decideAll(simCopy, seats, prompts, modelKinds)
+      let deadline = epochTime() + config.llmTimeoutSeconds.float
+      while epochTime() < deadline:
+        var ready = true
+        withLock stateLock:
+          for seat in seats:
+            if external[seat] and state.playerSockets.hasKey(seat) and
+                state.pendingActions[seat].isNil:
+              ready = false
+        if ready:
+          break
+        sleep(20)
+      for index, seat in seats:
+        if external[seat]:
+          var action: JsonNode
+          withLock stateLock:
+            action = state.pendingActions[seat]
+          if not action.isNil:
+            decisions[index] = parseDecision(action,
+              simCopy.config.testStrips, testing)
 
       withLock stateLock:
         for index, seat in seats:
@@ -336,17 +392,20 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           let wasScripted =
             client.playsScripted(prompts[seat], scripted[seat]) or
             decision.fallback
+          let externalAction = external[seat] and not state.pendingActions[seat].isNil
           try:
             if testing:
               state.sim.applyAnswers(seat, decision.answers, decision.publish,
-                decision.hypothesis, decision.notes, wasScripted,
+                decision.hypothesis, decision.notes,
+                wasScripted and not externalAction,
                 decision.fallback)
             else:
               echo "eleusis: ", state.sim.names[seat], " tests ",
                 (if decision.strip.len > 0: decision.strip else: "(nothing)"),
                 (if decision.publish: " and publishes" else: " and hoards")
               state.sim.applyResearch(seat, decision.strip, decision.publish,
-                decision.hypothesis, decision.notes, wasScripted,
+                decision.hypothesis, decision.notes,
+                wasScripted and not externalAction,
                 decision.fallback)
           except CatchableError as error:
             echo "eleusis: reply rejected (", error.msg,
@@ -448,7 +507,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         state.playerSockets.len, "/", state.config.tokens.len, ")"
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "eleusis.player.v1",
+        "protocol": "eleusis.player.v2",
         "slot": slot,
         "name": state.sim.names[slot],
         "rounds": state.config.rounds,
@@ -493,6 +552,29 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register":
+          if payload["control"].getStr() != "external":
+            raise newException(EleusisError, "unknown player control")
+          withLock stateLock:
+            state.external[slot] = true
+          return
+        if payload{"type"}.getStr() == "action":
+          withLock stateLock:
+            if state.external[slot] and payload["id"].getInt() ==
+                state.decisionId and state.pendingActions[slot].isNil:
+              let action = payload["action"]
+              let testing = state.sim.phase == phTest
+              let decision = parseDecision(action,
+                state.sim.config.testStrips, testing)
+              var probe = state.sim
+              if testing:
+                probe.applyAnswers(slot, decision.answers, decision.publish,
+                  decision.hypothesis, decision.notes, false)
+              else:
+                probe.applyResearch(slot, decision.strip, decision.publish,
+                  decision.hypothesis, decision.notes, false)
+              state.pendingActions[slot] = action
+          return
         if payload{"type"}.getStr() == "prompt":
           var prompt = payload{"prompt"}.getStr()
           ## Cut on a rune boundary: a byte slice through a multi-byte
@@ -508,6 +590,7 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.external[slot] = false
           echo "eleusis: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
@@ -588,6 +671,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
+  state.external = newSeq[bool](config.players.len)
+  state.pendingActions = newSeq[JsonNode](config.players.len)
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter(replayMode = false)
