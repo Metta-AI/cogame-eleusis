@@ -40,7 +40,7 @@ rings do not pay**: credit needs a *rival* to be actually right about a strip
 nobody has tested, self-citation is impossible by construction, and a
 duplicate publication has no author.
 
-**The game supports prompt, Jev, and scripted policies.** Each external player
+**The game supports prompt, external action, and scripted policies.** Each external player
 receives its own facts, the public corkboard, the static strip catalogue, and
 the current test strips. It returns an ordinary research or prediction action.
 The game validates and applies all five simultaneous decisions. Prompt policies
@@ -52,15 +52,10 @@ credentials are available, so episodes (and offline certification) always
 complete.
 
 The `freerider` baseline runs no experiments and predicts from the shared
-corkboard. Compare Jev against it when a short episode rewards avoiding
-experiment costs.
-
-`PLAYER_JEV=1` lets the player ask Jev whether to publish, which of 12
-unobserved catalogue strips to test (or skip), and every prediction-test
-answer. It uses only the private facts and public catalogue in its observation.
-Hosted play uses the Bedrock sidecar; direct local play uses `TYPESAFE_API_KEY`
-in the player environment. Earlier paired results used the superseded
-server-side Jev path and are historical integration data.
+corkboard. It is a control for short episodes that reward avoiding experiment
+costs. External players receive private facts and the public catalogue, then
+return complete research or prediction actions. The game validates them and
+uses its scripted baseline when an action is missing or invalid.
 
 Seats play under **anonymous cog aliases** (Sprocket, Gizmo, …): policy
 display names never reach the agents' prompts, so nobody can meta-game "that
@@ -84,7 +79,6 @@ already settled keep their money.
   version-space scripted baselines
 - `src/eleusis/server.nim` — mummy HTTP/WS server (player, global, replay)
 - `src/eleusis_player.nim` — prompt, scripted, or external-action player
-- `src/eleusis/jev_policy.nim` — player-side System One action ranking
 - `client/` — shared canvas renderer + global/player/replay pages (the parley
   broadcast chrome around the lab bench)
 - `replay-viewer/` — static wasm replay viewer (`?replay=<url>`)
@@ -158,7 +152,3 @@ uv run coworld upload-policy <eleusis image> --name my-eleusis \
 
 Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=openbook` or
 `--env PLAYER_SCRIPTED=hoarder` or `--env PLAYER_SCRIPTED=freerider`.
-The Jev policy uses `--env PLAYER_JEV=1`.
-`tools/eval_jev.py` runs matched native episodes and retains owner-only
-SystemOne request/response traces under ignored `dist/`. These are research
-data, not approved training labels.
