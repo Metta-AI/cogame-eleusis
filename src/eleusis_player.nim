@@ -15,7 +15,6 @@
 
 import
   std/[json, options, os, strutils],
-  eleusis/jev_policy,
   whisky
 
 const DefaultPrompt = """
@@ -37,26 +36,18 @@ when isMainModule:
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
-  let jevRequested = getEnv("PLAYER_JEV") == "1"
-  let jev = jevRequested and (
-    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
-    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
-    getEnv("TYPESAFE_API_KEY").strip().len > 0)
-  if prompt.len == 0 and not jev:
+  if prompt.len == 0:
     prompt = DefaultPrompt
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
 
   proc promptFrame(): string =
-    if jev: $ %*{"type": "register", "control": "external"}
-    else: $ %*{"type": "prompt", "prompt": prompt,
-      "scripted": (if jevRequested: "openbook" else: scripted)}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
 
   echo "eleusis player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "eleusis player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""),
-    (if jev: ", Jev choices" else: ""), ")"
+    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
 
   ## whisky's receiveMessage RAISES on a close frame or a truncated read
   ## (only a timeout returns none), and mummy's send only queues - so the
@@ -81,11 +72,6 @@ when isMainModule:
           ## Re-deliver the prompt after the welcome, in case the first send
           ## raced the server's slot registration.
           socket.send(promptFrame())
-        of "observation":
-          if jev:
-            let action = chooseAction(payload["observation"])
-            socket.send($ %*{"type": "action", "id": payload["id"],
-              "action": action})
         of "final":
           echo "eleusis player: final scores ", payload{"scores"}
           echo "eleusis player: the rule was ", payload{"rule"}.getStr()
