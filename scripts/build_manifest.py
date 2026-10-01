@@ -603,11 +603,7 @@ MANIFEST = {
             "type": "game",
             "image": IMAGE,
             "run": ["/bin/eleusis"],
-            "env": {
-                "ANTHROPIC_API_KEY_URI": (
-                    "secret://coworld/eleusis/anthropic_api_key"
-                )
-            },
+            "env": {},
             "source_url": SOURCE_URL,
         },
         "config_schema": CONFIG_SCHEMA,
