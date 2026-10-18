@@ -21,10 +21,11 @@
 ## scripted plays one deliberately, LLM or not.
 
 import
-  std/[json, options, os, random, sets, strutils, unicode],
+  std/[json, options, os, random, sets, strutils, unicode, times],
   bitworld/runtime,
   curly,
-  sim
+  sim, prompts, evidence
+export prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -52,6 +53,9 @@ type
     ltNone, ltSidecar, ltBedrock, ltAnthropic
 
   LlmClient* = ref object
+    batchId*: int
+    attemptIds*: array[Seats, seq[string]]
+    selectedAttemptIds*: array[Seats, string]
     curl: Curly
     transport: LlmTransport
     apiKey: string          ## anthropic transport
@@ -234,7 +238,7 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
 proc money(value: float): string =
   formatFloat(value, ffDecimal, 2)
 
-const SystemTemplate = """You are <alias>, one of 5 rival scientists in the ELEUSIS laboratory.
+const SystemTemplate = """<introduction>
 
 A sealed machine holds ONE hidden rule. You feed it a STRIP of exactly 4
 coloured tokens - each token is R (red), B (blue), G (green) or Y (yellow),
@@ -281,11 +285,11 @@ OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
 no explanation, no markdown fences, no text before or after the object. Your
 reply must begin with the character { and end with }."""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   ## The seat's rules-of-the-world block. The whole hypothesis space is
   ## public; only the instance is hidden.
   SystemTemplate
-    .replace("<alias>", sim.names[seat])
+    .replace("<introduction>", selection.introduction(sim.names[seat]))
     .replace("<experimentCost>", money(sim.config.experimentCost))
     .replace("<testEvery>", $sim.config.testEvery)
     .replace("<testStrips>", $sim.config.testStrips)
@@ -548,6 +552,14 @@ proc parseDecision*(payload: JsonNode, testStrips: int, testing: bool):
         "experiment must be a 4-letter string: " & $node)
     result.strip = normaliseStrip(node.getStr())
 
+proc decisionJson*(decision: Decision, testing: bool): JsonNode =
+  result = %*{"publish": decision.publish, "hypothesis": decision.hypothesis, "notes": decision.notes}
+  if testing:
+    result["answers"] = newJArray()
+    for answer in decision.answers: result["answers"].add(%($answer))
+  else:
+    result["experiment"] = %decision.strip
+
 proc playsScripted*(client: LlmClient, prompt: string,
     kind: ScriptKind): bool =
   ## A seat plays a built-in baseline instead of Claude when it registered as
@@ -563,12 +575,18 @@ proc decideAll*(
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order — all of them as ONE parallel
   ## batch, because every seat decides simultaneously by rule. Never raises:
   ## any failure falls back to the `openbook` scripted baseline so the
   ## episode always advances. `prompts` and `scripted` are indexed by SEAT.
+  inc client.batchId
+  for seat in 0 ..< Seats:
+    client.attemptIds[seat] = @[]
+    client.selectedAttemptIds[seat] = ""
+  let destination = getEnv("ELEUSIS_ATTEMPT_TRACE_DIR")
   result = newSeq[Decision](seats.len)
   let testing = sim.phase == phTest
   var open: seq[int]     ## indexes into `seats` still undecided
@@ -583,23 +601,45 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var paths, ids: seq[string]
+    var starts: seq[float]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
       if attempt > 0:
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object and nothing else.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let system = systemPrompt(sim, seat, selection)
+      let request = client.requestFor(system, user, seat)
+      let identity = $client.batchId & "-" & $seat & "-" & $attempt
+      let path = destination / (identity & ".jsonl")
+      paths.add(path)
+      ids.add(identity)
+      starts.add(epochTime())
+      client.attemptIds[seat].add(identity)
+      if destination.len > 0:
+        let model = if client.transport == ltBedrock: client.bedrockModels[client.bedrockModel] else: client.model
+        writePrivate(path, $(%*{
+          "event_type": "attempt_started", "attempt_id": identity, "visibility": "private",
+          "source_revision": getEnv("ELEUSIS_SOURCE_REVISION"), "batch": client.batchId,
+          "seat": seat, "round": sim.round, "phase": $sim.phase, "retry": attempt,
+          "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+          "prompt_template": selection.promptMetadata(system, user),
+          "request": {"transport": $client.transport, "model": model, "body": parseJson(request.body)}}) & "\n")
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var text, failure: string
+      var parsed, normalized = newJNull()
+      var selected = false
       try:
-        let text = client.textOf(responses[position].response,
+        text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        let decision = parseDecision(extractJsonObject(text),
-          sim.config.testStrips, testing)
+        parsed = extractJsonObject(text)
+        let decision = parseDecision(parsed, sim.config.testStrips, testing)
+        normalized = decisionJson(decision, testing)
         ## Reject illegal replies HERE so the retry carries the hint and an
         ## illegal move never reaches the real sim.
         var probe = sim
@@ -610,10 +650,21 @@ proc decideAll*(
           probe.applyResearch(seat, decision.strip, decision.publish,
             decision.hypothesis, decision.notes, false)
         result[index] = decision
+        selected = true
+        client.selectedAttemptIds[seat] = ids[position]
       except CatchableError as error:
+        failure = error.msg
         echo "eleusis llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
+      finally:
+        if destination.len > 0:
+          appendPrivate(paths[position], %*{
+            "event_type": "attempt_finished", "attempt_id": ids[position],
+            "raw_response": responses[position].response.body, "response": text,
+            "failure": failure, "parsed_action": parsed, "normalized_action": normalized,
+            "selected": selected, "latency_ms": int((epochTime() - starts[position]) * 1000.0),
+            "platform_call_id": newJNull(), "behavior_logprobs": newJNull()})
     open = stillOpen
   for index in open:
     let seat = seats[index]

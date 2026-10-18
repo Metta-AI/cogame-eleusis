@@ -140,7 +140,7 @@ suite "scripted baselines":
     let seats = sim.pendingSeats()
     let decisions = client.decideAll(sim, seats,
       @["be bold", "", "", "", ""],
-      @[skNone, skNone, skHoarder, skNone, skOpenbook])
+      @[skNone, skNone, skHoarder, skNone, skOpenbook], PromptSelection())
     check decisions.len == Seats
     for index, seat in seats:
       let kind = if seat == 2: skHoarder else: skOpenbook
@@ -162,7 +162,7 @@ suite "scripted baselines":
     var sim = initSim(config)
     let seats = sim.pendingSeats()
     let decisions = client.decideAll(sim, seats,
-      @["", "  ", "", "", ""], @[skNone, skNone, skNone, skNone, skNone])
+      @["", "  ", "", "", ""], @[skNone, skNone, skNone, skNone, skNone], PromptSelection())
     check decisions.len == Seats
     for index, seat in seats:
       ## No request was ever built, so nothing failed and nothing fell back.
@@ -242,7 +242,7 @@ suite "scripted baselines":
     check sim.ruleText() notin text
     check "note 1" notin text
     check text.runeLen > 200
-    let system = sim.systemPrompt(0)
+    let system = sim.systemPrompt(0, PromptSelection())
     check "ELEUSIS laboratory" in system
     check "must begin with the character {" in system
     check sim.ruleText() notin system

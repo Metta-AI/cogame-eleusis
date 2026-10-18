@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:eleusis-train-bridge tools/train_bridge.nim
 
 import std/[json, options, os]
-import eleusis/[llm, sim]
+import eleusis/[llm, sim, observations]
 
 const
   OperatorPrompt = "Choose experiments and predictions that maximize your score over the complete game."
@@ -46,28 +46,7 @@ proc hostedAction(action: JsonNode, testing: bool): JsonNode =
   else:
     result["experiment"] = action["experiment"]
 
-proc decision(view: Sim, seat, id: int): JsonNode =
-  var board = newJArray()
-  for fact in view.board:
-    board.add(%*{"strip": fact.strip, "verdict": $fact.verdict,
-      "author": fact.author, "round": fact.round,
-      "duplicate": fact.duplicate})
-  var ownFacts = newJArray()
-  for fact in view.seats[seat].log:
-    ownFacts.add(%*{"strip": fact.strip, "verdict": $fact.verdict,
-      "round": fact.round, "mode": fact.mode})
-  var seats = newJArray()
-  for other in 0 ..< Seats:
-    let state = view.seats[other]
-    seats.add(%*{"seat": other, "score": state.score,
-      "knowledge": state.knowledge, "credit": state.credit,
-      "spend": state.spend, "experiments": state.experiments,
-      "published": state.published, "correct": state.correct,
-      "answered": state.answered})
-  var strips = newJArray()
-  if view.phase == phTest:
-    for strip in view.test.strips:
-      strips.add(%strip)
+proc decision(view: Sim, seat, id: int, selection: PromptSelection, textMode: bool): JsonNode =
   let actions = view.heads()
   var fields = newJObject()
   for head in actions:
@@ -76,19 +55,13 @@ proc decision(view: Sim, seat, id: int): JsonNode =
       if choice.kind != JNull:
         legal.add(choice)
     fields[head["name"].getStr()] = %*{"enum": legal}
-  %*{
+  result = %*{
     "kind": "decision", "game": "eleusis", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": view.round,
-    "semantic_view": {"round": view.round, "rounds": view.config.rounds,
-      "phase": $view.phase, "board": board, "own_facts": ownFacts,
-      "seats": seats, "test_strips": strips,
-      "pending": (if view.seats[seat].pending.isSome:
-        %*{"strip": view.seats[seat].pending.get().strip,
-          "verdict": $view.seats[seat].pending.get().verdict}
-        else: newJNull())},
+    "semantic_view": decisionView(view, seat, textMode),
     "inbox": [],
     "messages": [
-      {"role": "system", "content": systemPrompt(view, seat)},
+      {"role": "system", "content": systemPrompt(view, seat, selection)},
       {"role": "user", "content": userPrompt(view, seat, OperatorPrompt)}
     ],
     "speech_messages": [],
@@ -97,6 +70,23 @@ proc decision(view: Sim, seat, id: int): JsonNode =
         "answer2", "answer3", "answer4", "answer5"]},
     "typed_question": newJNull()
   }
+
+  if textMode:
+    result["semantic_view"]["prompt_template"] = selection.promptMetadata(
+      result["messages"][0]["content"].getStr(), result["messages"][1]["content"].getStr())
+    let testing = view.phase == phTest
+    var properties = %*{"publish": {"type": "boolean"},
+      "hypothesis": {"type": "string", "maxLength": MaxHypothesisLen},
+      "notes": {"type": "string", "maxLength": MaxNotesLen}}
+    var required = %*["publish"]
+    if testing:
+      properties["answers"] = %*{"type": "array", "minItems": view.config.testStrips,
+        "maxItems": view.config.testStrips, "items": {"enum": ["pass", "fail"]}}
+      required.add(%"answers")
+    else:
+      properties["experiment"] = %*{"type": "string", "pattern": "^([RBGY]{4})?$"}
+      required.add(%"experiment")
+    result["action_schema"] = %*{"type": "object", "properties": properties, "required": required}
 
 proc encoding(view: Sim, seat, id: int, variant: string): JsonNode =
   var values = newJArray()
@@ -140,15 +130,18 @@ proc encoding(view: Sim, seat, id: int, variant: string): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: eleusis-train-bridge MANIFEST [variant]", 1)
-  let variant = if args.len == 2: args[1] else: Variants[0]
+  if args.len notin 1 .. 3:
+    quit("usage: eleusis-train-bridge MANIFEST [variant [text]]", 1)
+  let textMode = args.len == 3
+  if textMode: doAssert args[2] == "text"
+  let variant = if args.len >= 2: args[1] else: Variants[0]
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
     if entry["id"].getStr() == variant:
       variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil, "unknown variant: " & variant
+  var selection: PromptSelection
   var game, view: Sim
   var batch: array[Seats, Decision]
   var seat = 0
@@ -159,6 +152,11 @@ when isMainModule:
     case request["kind"].getStr()
     of "reset":
       doAssert request["players"].getInt() == Seats
+      selection = if textMode: promptSelection(request) else: PromptSelection()
+      let split = if request.hasKey("split"): request["split"].getStr() else: "train"
+      doAssert split in ["train", "validation", "test"]
+      if split == "train" and selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        raise newException(ValueError, "held-out wording is evaluation-only")
       var config = defaultGameConfig()
       let runtimeConfig = copy(variantConfig)
       runtimeConfig["tokens"] = newJArray()
@@ -171,7 +169,7 @@ when isMainModule:
       view = game
       seat = 0
       id = 0
-      response = view.decision(seat, id)
+      response = view.decision(seat, id, selection, textMode)
     of "encode":
       doAssert not game.done
       response = view.encoding(seat, id, variant)
@@ -179,25 +177,29 @@ when isMainModule:
       doAssert not game.done
       let teacher = scriptedAction(view, seat,
         if seat mod 2 == 0: skOpenbook else: skHoarder)
-      response = %*{"response": $action(teacher, view.phase == phTest)}
+      response = %*{"response": $(if textMode: decisionJson(teacher, view.phase == phTest)
+        else: action(teacher, view.phase == phTest))}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
-      let chosen = parseJson(request["response"].getStr())
-      let heads = view.heads()
-      for head in heads:
-        let name = head["name"].getStr()
-        doAssert chosen[name] in head["choices"], "action is masked: " & name
+      let chosen = extractJsonObject(request["response"].getStr())
       let testing = view.phase == phTest
-      batch[seat] = parseDecision(hostedAction(chosen, testing),
-        game.config.testStrips, testing)
+      var payload = chosen
+      if not textMode:
+        for head in view.heads():
+          let name = head["name"].getStr()
+          doAssert chosen[name] in head["choices"], "action is masked: " & name
+        payload = hostedAction(chosen, testing)
+      let parsed = parseDecision(payload, game.config.testStrips, testing)
+      batch[seat] = parsed
+      let accepted = if textMode: decisionJson(parsed, testing) else: chosen
       inc seat
       if seat == Seats:
         for other in 0 ..< Seats:
           let move = batch[other]
           if testing:
-            game.applyAnswers(other, move.answers, move.publish, "", "", false)
+            game.applyAnswers(other, move.answers, move.publish, move.hypothesis, move.notes, false)
           else:
-            game.applyResearch(other, move.strip, move.publish, "", "", false)
+            game.applyResearch(other, move.strip, move.publish, move.hypothesis, move.notes, false)
         view = game
         seat = 0
       inc id
@@ -208,8 +210,8 @@ when isMainModule:
           scores[$other] = %game.score(other)
         observation = %*{"kind": "terminal", "scores": scores}
       else:
-        observation = view.decision(seat, id)
-      response = %*{"kind": "accepted", "action": chosen,
+        observation = view.decision(seat, id, selection, textMode)
+      response = %*{"kind": "accepted", "action": accepted,
         "observation": observation}
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())
