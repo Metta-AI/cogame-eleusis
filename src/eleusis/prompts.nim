@@ -17,7 +17,7 @@ type
     seed*: int
 
 const
-  PromptBankVersion* = "eleusis-rules-v1"
+  PromptBankVersion* = "eleusis-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:

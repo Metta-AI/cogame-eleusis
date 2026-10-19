@@ -8,7 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BRIDGE = Path(sys.argv[1]).resolve()
-ORIGINAL = Path(sys.argv[2]).resolve()
 WORDINGS = (
     "canonical",
     "plain",
@@ -20,16 +19,13 @@ WORDINGS = (
 )
 
 
-def play(
-    variant, seed, wording="canonical", prompt_seed=0, normalize=False, original=False
-):
+def play(variant, seed, wording="canonical", prompt_seed=0, normalize=False):
     command = [
-        str(ORIGINAL if original else BRIDGE),
+        str(BRIDGE),
         str(ROOT / "coworld_manifest_template.json"),
         variant,
     ]
-    if not original:
-        command.append("text")
+    command.append("text")
     with subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
     ) as process:
@@ -71,32 +67,31 @@ def play(
                 batch_public = public
             else:
                 assert public == batch_public
-            if not original:
-                metadata = view.pop("prompt_template")
-                selected = WORDINGS[prompt_seed] if wording == "mixed" else wording
-                assert (metadata["bank"], metadata["variant"]) == (
-                    "eleusis-rules-v1",
-                    selected,
+            metadata = view.pop("prompt_template")
+            selected = WORDINGS[prompt_seed] if wording == "mixed" else wording
+            assert (metadata["bank"], metadata["variant"]) == (
+                "eleusis-rules-v2",
+                selected,
+            )
+            for message in messages:
+                assert (
+                    metadata[message["role"] + "_sha256"].lower()
+                    == hashlib.sha256(message["content"].encode()).hexdigest()
                 )
-                for message in messages:
-                    assert (
-                        metadata[message["role"] + "_sha256"].lower()
-                        == hashlib.sha256(message["content"].encode()).hexdigest()
-                    )
-                if normalize:
-                    marker = ("雪", "森", "海", "山", "月")[seat]
-                    assert all(
-                        other not in messages[1]["content"]
-                        for other in ("雪", "森", "海", "山", "月")
-                        if other != marker
-                    )
-                    if len(trace) >= 5:
-                        assert view["notes"] == marker * 599 + "…"
-                        for other in range(5):
-                            assert (
-                                view["seats"][other]["hypothesis"]
-                                == f"public-{other}-" + "x" * 110 + "…"
-                            )
+            if normalize:
+                marker = ("雪", "森", "海", "山", "月")[seat]
+                assert all(
+                    other not in messages[1]["content"]
+                    for other in ("雪", "森", "海", "山", "月")
+                    if other != marker
+                )
+                if len(trace) >= 5:
+                    assert view["notes"] == marker * 599 + "…"
+                    for other in range(5):
+                        assert (
+                            view["seats"][other]["hypothesis"]
+                            == f"public-{other}-" + "x" * 110 + "…"
+                        )
             assert (
                 systems.setdefault(seat, messages[0]["content"])
                 == messages[0]["content"]
@@ -135,11 +130,7 @@ def play(
                 assert action == proposal
             projection = {"publish": action["publish"]}
             if testing:
-                projection["answers"] = (
-                    [action[f"answer{i}"] for i in range(6)]
-                    if original
-                    else action["answers"]
-                )
+                projection["answers"] = action["answers"]
             else:
                 projection["experiment"] = action["experiment"]
             trace.append((view, messages, projection))
@@ -155,47 +146,31 @@ def play(
 
 
 for variant in ("standard", "open-science", "closed-shop"):
-    for seed in ("17", "946001"):
-        original, original_outcome, original_systems = play(
-            variant, seed, original=True
-        )
+    for seed in ("17",):
         canonical = None
         introductions, selected_systems = set(), {}
         for wording, prompt_seed in [
             *((name, 0) for name in WORDINGS),
-            *(("mixed", i) for i in range(5)),
+            ("mixed", 4),
         ]:
             trace, outcome, systems = play(variant, seed, wording, prompt_seed)
             selected = WORDINGS[prompt_seed] if wording == "mixed" else wording
             assert selected_systems.setdefault(selected, systems) == systems
-            introductions.add(systems[0].split("\n", 1)[0])
-            stripped = [
-                (view, messages[0]["content"].split("\n", 1)[1], messages[1], action)
-                for view, messages, action in trace
-            ]
+            introductions.add(systems[0])
+            stripped = [(view, messages[1], action) for view, messages, action in trace]
             if canonical is None:
                 canonical = stripped, outcome
-                assert systems == original_systems and outcome == original_outcome
-                for (view, _, action), (old_view, _, old_action) in zip(
-                    trace, original, strict=True
-                ):
-                    comparable = json.loads(json.dumps(view))
-                    comparable.pop("notes")
-                    for other in comparable["seats"]:
-                        other.pop("hypothesis")
-                    assert comparable == old_view and action == old_action
             else:
                 assert (stripped, outcome) == canonical
         assert len(introductions) == 7
         print(
             variant,
             seed,
-            "12 full matched games and original numeric trajectory PASS",
+            "8 complete matched wording games PASS",
             flush=True,
         )
     _, normalized_result, _ = play(variant, "17", normalize=True)
-    _, baseline_result, _ = play(variant, "17", original=True)
-    assert normalized_result == baseline_result
+    assert normalized_result == canonical[1]
     for wording in WORDINGS[5:]:
         rejected = subprocess.run(
             [

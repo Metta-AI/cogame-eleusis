@@ -43,11 +43,8 @@ const
     ## a short episode that exits the instant it writes its artifacts fails
     ## that check. Keep answering for a bounded grace, then exit.
 
-import observations, evidence
-
 type
   GameState = object
-    tracePath: string
     selection: PromptSelection
     config: GameConfig
     sim: Sim
@@ -219,8 +216,6 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       return
     state.finished = true
     results = state.sim.resultsJson()
-    if state.tracePath.len > 0:
-      appendPrivate(state.tracePath, %*{"event_type": "host_finished", "results": results})
     replayData = state.replayPayload(results)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
@@ -393,10 +388,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
-          let eventStart = state.sim.events.len
-          var applied = false
-          var fallbackUsed = false
-          var installed = decision
           ## A decision the LLM never delivered is a scripted move, and it is
           ## recorded as one: `scripted` true and `fallback` true on the event.
           let wasScripted =
@@ -417,7 +408,6 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                 decision.hypothesis, decision.notes,
                 wasScripted and not externalAction,
                 decision.fallback)
-            applied = true
           except CatchableError as error:
             echo "eleusis: reply rejected (", error.msg,
               "); using scripted fallback"
@@ -425,43 +415,14 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             ## simply stays open and the play deadline settles the episode.
             try:
               let fallback = scriptedAction(state.sim, seat, skOpenbook)
-              installed = fallback
-              fallbackUsed = true
               if testing:
                 state.sim.applyAnswers(seat, fallback.answers,
                   fallback.publish, fallback.hypothesis, "", true, true)
               else:
                 state.sim.applyResearch(seat, fallback.strip,
                   fallback.publish, fallback.hypothesis, "", true, true)
-              applied = true
             except CatchableError as inner:
               echo "eleusis: scripted fallback refused too: ", inner.msg
-          if state.tracePath.len > 0:
-            var events = newJArray()
-            for eventIndex in eventStart ..< state.sim.events.len:
-              events.add(eventToJson(state.sim.events[eventIndex]))
-            let system = systemPrompt(simCopy, seat, state.selection)
-            let user = userPrompt(simCopy, seat, prompts[seat])
-            let modelAccepted = applied and not external[seat] and not fallbackUsed and
-              not wasScripted and client.selectedAttemptIds[seat].len > 0
-            let origin = if externalAction: "external"
-              elif fallbackUsed or decision.fallback: "scripted-fallback"
-              elif wasScripted: "scripted"
-              else: "model"
-            appendPrivate(state.tracePath, %*{
-              "event_type": "host_decision", "visibility": "private", "batch": decisionId,
-              "seat": seat, "round": simCopy.round, "phase": $simCopy.phase,
-              "observation": decisionView(simCopy, seat, true),
-              "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-              "prompt_template": state.selection.promptMetadata(system, user),
-              "proposal": decisionJson(decision, testing),
-              "executed_action": (if applied: decisionJson(installed, testing) else: newJNull()),
-              "applied": applied, "policy_origin": origin,
-              "attempt_ids": client.attemptIds[seat],
-              "selected_attempt_id": (if modelAccepted: %client.selectedAttemptIds[seat] else: newJNull()),
-              "event_start": eventStart, "event_end": state.sim.events.len, "events": events,
-              "stored_hypothesis": state.sim.seats[seat].hypothesis,
-              "stored_notes": state.sim.seats[seat].notes, "terminal": state.sim.done})
         state.broadcastLocked()
 
       ## Floor the wall-clock gap between the STARTS of consecutive batches:
@@ -710,11 +671,6 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.selection = promptSelection(parseJson(runtimeConfig.config))
   state.config = config
   state.sim = initSim(config)
-  state.tracePath = getEnv("ELEUSIS_HOST_TRACE_PATH")
-  if state.tracePath.len > 0:
-    writePrivate(state.tracePath, $(%*{"event_type": "host_started", "visibility": "private",
-      "source_revision": getEnv("ELEUSIS_SOURCE_REVISION"), "seed": config.seed,
-      "prompt_selection": state.selection.selectionMetadata()}) & "\n")
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   state.external = newSeq[bool](config.players.len)

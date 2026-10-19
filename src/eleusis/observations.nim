@@ -1,4 +1,4 @@
-## Private decision observations shared by collection and evidence.
+## Private decision observations for full-game collection.
 import std/[json, options]
 import sim
 

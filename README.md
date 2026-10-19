@@ -153,5 +153,5 @@ uv run coworld upload-policy <eleusis image> --name my-eleusis \
 Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=openbook` or
 `--env PLAYER_SCRIPTED=hoarder` or `--env PLAYER_SCRIPTED=freerider`.
 
-Prompt variants, private provenance, and reviewed training candidates are documented
+Prompt variants, wording metadata, and seeded teacher exports are documented
 in [TRAINING.md](TRAINING.md).
