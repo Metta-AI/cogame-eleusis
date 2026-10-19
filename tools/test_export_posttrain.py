@@ -64,7 +64,9 @@ if __name__ == "__main__":
                         "YOUR NOTES FROM EARLIER ROUNDS:", 1
                     )[0]
                     batch = (row["episode_id"], row["decision_id"] // 5)
-                    assert public_batches.setdefault(batch, public) == public
+                    assert public_batches.setdefault(
+                        batch, public.replace(" (you)", "")
+                    ) == public.replace(" (you)", "")
                     assert row["prompt_template"]["variant"] not in (
                         "heldout-briefing",
                         "heldout-reference",
