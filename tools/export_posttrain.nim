@@ -41,9 +41,13 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + games:
     var wording = selection
-    if wording.variant == pvMixed: wording.seed += seed - firstSeed
+    let partition = ord(seed mod 5 == 0)
+    if wording.variant == pvMixed:
+      wording.seed += wordingCounts[partition]
+    inc wordingCounts[partition]
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -78,7 +82,7 @@ when isMainModule:
         let system = systemPrompt(sim, seat, wording)
         let user = userPrompt(sim, seat, OperatorPrompt)
         rows.add($(%*{
-          "episode_id": "eleusis-" & variant & "-" & $seed,
+          "episode_id": "eleusis-" & variant & "-" & $seed & "-" & $wording.selectedVariant,
           "seed": "eleusis-" & $seed,
           "decision_id": rows.len,
           "prompt": [
