@@ -82,7 +82,8 @@ when isMainModule:
         let system = systemPrompt(sim, seat, wording)
         let user = userPrompt(sim, seat, OperatorPrompt)
         rows.add($(%*{
-          "episode_id": "eleusis-" & variant & "-" & $seed & "-" & $wording.selectedVariant,
+          "episode_id": "eleusis-" & variant & "-" & $seed & "-" & $wording.variant & "-" &
+            $wording.selectedVariant & "-" & $wording.seed,
           "seed": "eleusis-" & $seed,
           "decision_id": rows.len,
           "prompt": [

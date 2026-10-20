@@ -56,7 +56,8 @@ The actual reply parser and simulator apply every action.
 Outputs retain the original `train.jsonl`, `validation.jsonl`, and
 `manifest.json` format. Rows include wording metadata and exact message hashes.
 Mixed selection cycles the five training wordings separately within each split.
-Episode IDs include wording to distinguish matched collections. Seed families
+Episode IDs include requested selection, resolved wording, and prompt seed
+to distinguish matched collections. Seed families
 exclude variant and wording; multiples of five enter validation. Held-out
 wordings cannot enter teacher exports. Output directories are private and must
 not already exist.
