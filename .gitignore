@@ -3,3 +3,5 @@ dist/
 replay-viewer/dist/
 bin/
 tmp/
+/.starter/
+__pycache__/

@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r ${flags} --path:src -o:"${RUNNER_TEMP}/$(basename "${t}" .nim)-${m}" "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -154,6 +154,14 @@ jobs:
           set -euo pipefail
           nim c -d:release --path:src -o:/tmp/eleusis-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/eleusis-train-bridge
+
+      - name: Complete wording and teacher exports
+        run: |
+          set -euo pipefail
+          nim c -d:release --path:src -o:"${RUNNER_TEMP}/eleusis-export" tools/export_posttrain.nim
+          python3 tools/test_export_posttrain.py "${RUNNER_TEMP}/eleusis-export"
+          python3 tools/test_prompt_games.py /tmp/eleusis-train-bridge
+
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

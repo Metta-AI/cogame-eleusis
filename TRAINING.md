@@ -17,40 +17,65 @@ It exposes public facts and each seat's own experiments, without the hidden
 rule or test answers. Every seat in a research or test batch observes the
 same pre-batch state, matching the hosted simultaneous decision path.
 
-## Metta post-training data
+## Episode-stable prompt variants
 
-The native simulator and published `openbook` and `hoarder` policies export
-supervised examples for all three certified Eleusis variants:
+The game accepts `promptVariant` and `promptSeed` independently of the simulator seed.
+The default is `canonical`. Training wordings are `canonical`, `plain`, `numbered`,
+`questions`, and `reordered`. `mixed` chooses one using `promptSeed % 5` and
+requires an explicit nonnegative seed. Selection stays fixed throughout the episode.
+`heldout-briefing` and `heldout-reference` are evaluation-only.
+
+The v2 bank varies the role introduction, experiment/publication explanation,
+and prediction/citation incentives. The rules, private information,
+response schema, scoring, and published budgets remain identical. The canonical
+system prompt preserves the original bytes. This tests sensitivity to framing;
+it does not establish improved learning or robustness.
+
+The bridge accepts an optional third argument, `text`, for complete JSON actions,
+including public hypotheses and private notes. Numeric actions retain their existing
+meaning. Text reset requests accept the prompt selectors and `split`; held-out
+wordings are rejected for training. Private observations include the bank version,
+resolved wording, selection seed, and SHA256 hashes of the exact prompt messages.
+
+## Teacher exports
+
+Build once, then export from a clean committed checkout:
 
 ```sh
-nimby sync nimby.lock
+nim c -d:release --path:src -o:/tmp/eleusis-export tools/export_posttrain.nim
 for variant in standard open-science closed-shop; do
-  nim r -d:release --path:src tools/export_posttrain.nim \
-    "/tmp/eleusis-${variant}" 10 1 "$variant"
+  /tmp/eleusis-export "/tmp/eleusis-${variant}" 10 1 "$variant" mixed 0
 done
 ```
 
-Each run reads the variant configuration from the Coworld manifest, adds the
-per-seat tokens supplied by the hosted platform, and plays complete seeded
-games. At each research or prediction phase, it records every seat's hosted
-system and user prompts and a scripted decision accepted by the game's reply
-parser. Parsed decisions advance the simulator together. Even seats use the
-publishing `openbook` policy; odd seats use `hoarder`. Whole games stay in one
-split. The output manifest records source revision, variant, scores, rounds,
-and row counts. Existing output directories are never overwritten.
+Each export plays complete published games with five scientists, 24 research rounds,
+and four prediction tests. Even seats use `openbook`; odd seats use `hoarder`.
+All five observations are frozen before any action in their simultaneous batch.
+The actual reply parser and simulator apply every action.
 
-Train an output with Metta post-training:
+Outputs retain the original `train.jsonl`, `validation.jsonl`, and
+`manifest.json` format. Rows include wording metadata and exact message hashes.
+Mixed selection cycles the five training wordings separately within each split.
+Episode IDs include requested selection, resolved wording, and prompt seed
+to distinguish matched collections. Seed families
+exclude variant and wording; multiples of five enter validation. Held-out
+wordings cannot enter teacher exports. Output directories are private and must
+not already exist.
+
+The exporter freezes all five decisions before applying any. Later seats cannot
+read publications or hypotheses submitted earlier in the same batch. Every
+teacher action must pass the real parser unchanged and is applied by the engine.
+
+## Validation
 
 ```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/eleusis-standard \
-  --output /tmp/eleusis-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
+python3 tools/test_train_bridge.py /tmp/eleusis-train-bridge
+python3 tools/test_prompt_games.py /tmp/eleusis-train-bridge
+python3 tools/test_export_posttrain.py /tmp/eleusis-export
 ```
 
-Ten complete games per variant yielded 1,120 training and 280 validation
-examples each. All 4,200 examples fit the Qwen2.5-0.5B-Instruct tokenizer in
-4,096 tokens; the maximum was 2,430. These examples distill scripted
-teachers; they do not establish stronger league play.
-One CPU optimizer step per variant with a local tiny model included every
-example and reduced heldout loss, verifying the Metta post-training path.
+The wording workflow runs 27 complete games across the three published variants,
+including private notes, simultaneous public hypotheses, and normalized actions.
+The export workflow runs 30 complete games and checks batch visibility,
+seed-family separation, and research/prediction action grammar.
+These deterministic checks do not demonstrate improved learning or robustness.

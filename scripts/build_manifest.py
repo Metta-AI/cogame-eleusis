@@ -316,6 +316,14 @@ CONFIG_SCHEMA = {
             "minimum": SEATS,
             "maximum": SEATS,
         },
+        "promptVariant": {
+            "type": "string",
+            "enum": ["canonical", "plain", "numbered", "questions", "reordered",
+                     "heldout-briefing", "heldout-reference", "mixed"],
+            "default": "canonical",
+            "description": "Episode-stable wording; held-out variants are evaluation-only.",
+        },
+        "promptSeed": {"type": "integer", "minimum": 0, "default": 0},
         "seed": {
             "description": (
                 "Pins the hidden rule, every prediction-test draw and the "

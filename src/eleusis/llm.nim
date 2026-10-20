@@ -24,7 +24,8 @@ import
   std/[json, options, os, random, sets, strutils, unicode],
   bitworld/runtime,
   curly,
-  sim
+  sim, prompts
+export prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -234,7 +235,7 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
 proc money(value: float): string =
   formatFloat(value, ffDecimal, 2)
 
-const SystemTemplate = """You are <alias>, one of 5 rival scientists in the ELEUSIS laboratory.
+const SystemTemplate = """<introduction>
 
 A sealed machine holds ONE hidden rule. You feed it a STRIP of exactly 4
 coloured tokens - each token is R (red), B (blue), G (green) or Y (yellow),
@@ -255,24 +256,9 @@ The hidden rule is exactly ONE entry of this public catalogue (68 in all):
 Every strip the machine PASSES obeys that one rule; every strip it FAILS
 breaks it. Nothing else is random.
 
-Each round you may run ONE experiment; it costs $<experimentCost>. ONLY YOU
-see the verdict. On your NEXT turn you decide what to do with it:
- - PUBLISH: it is pinned to the shared corkboard. Every rival reads it, and
-   you may earn citation credit later. Publishing a strip somebody already
-   published earns nothing, ever.
- - HOARD: it stays yours alone.
+<research>
 
-Every <testEvery> rounds a PREDICTION TEST scores everyone: <testStrips>
-strips nobody has ever tested, exactly half of which the machine passes. A
-prize pool of $<knowledgePool> is split between the seats in proportion to
-how many each got right - so every rival you teach takes a slice of your
-pool. Citation credit pays the other way: when another seat answers a test
-strip correctly and one of YOUR published results differs from that strip in
-exactly one token, a $<citePot> pot for that strip is shared between the
-seats whose published results do. You are never paid for your own answers.
-
-Your score is prize money + citation credit - $<experimentCost> per
-experiment. Highest score wins. Nothing else scores.
+<rewards>
 
 Your notes are private and are handed back to you every turn. Your
 hypothesis line is PUBLIC - every rival reads it, and it is not binding.
@@ -281,11 +267,31 @@ OUTPUT FORMAT: reply with ONLY one JSON object, nothing else - no analysis,
 no explanation, no markdown fences, no text before or after the object. Your
 reply must begin with the character { and end with }."""
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   ## The seat's rules-of-the-world block. The whole hypothesis space is
   ## public; only the instance is hidden.
+  let research = case selection.selectedVariant
+    of pvCanonical: "Each round you may run ONE experiment; it costs $<experimentCost>. ONLY YOU\nsee the verdict. On your NEXT turn you decide what to do with it:\n - PUBLISH: it is pinned to the shared corkboard. Every rival reads it, and\n   you may earn citation credit later. Publishing a strip somebody already\n   published earns nothing, ever.\n - HOARD: it stays yours alone."
+    of pvPlain: "Each round allows one experiment costing $<experimentCost>; only you learn its verdict. On your next turn, choose PUBLISH to put that result on the public corkboard, where rivals can read it and it may earn citation credit, or HOARD to keep it private. Publishing an already published strip never earns anything."
+    of pvNumbered: "1. Run at most one experiment per round for $<experimentCost>.\n2. Its verdict is private to you.\n3. Next turn, PUBLISH it to the corkboard for rivals to read and possible citation credit, or HOARD it privately.\n4. A strip already published can never earn anything through duplicate publication."
+    of pvQuestions: "What does an experiment cost? $<experimentCost>, with one allowed each round. Who sees its verdict? Only you. What happens next turn? You choose PUBLISH for the public corkboard and possible citation credit, or HOARD to keep it private. Can publishing an already published strip pay? Never."
+    of pvReordered: "PUBLISH puts a result on the corkboard for every rival to read and may earn citation credit; HOARD keeps it private. You make this choice on the turn after the experiment. Each round permits one experiment costing $<experimentCost>, with a verdict visible only to you. Duplicate publication never earns anything."
+    of pvHeldoutBriefing: "Run one experiment in a round at a cost of $<experimentCost> and receive its verdict privately. At the following turn, decide whether to share it through PUBLISH or retain it through HOARD. Publication makes it visible to all rivals and eligible for citation credit, but publishing a strip already on the corkboard never pays."
+    of pvHeldoutReference: "Experiment limit: one per round. Cost: $<experimentCost>. Verdict visibility: you alone. Following-turn choice: PUBLISH to the shared corkboard for rival access and possible citation credit, or HOARD privately. Duplicate publication: never pays."
+    of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
+  let rewards = case selection.selectedVariant
+    of pvCanonical: "Every <testEvery> rounds a PREDICTION TEST scores everyone: <testStrips>\nstrips nobody has ever tested, exactly half of which the machine passes. A\nprize pool of $<knowledgePool> is split between the seats in proportion to\nhow many each got right - so every rival you teach takes a slice of your\npool. Citation credit pays the other way: when another seat answers a test\nstrip correctly and one of YOUR published results differs from that strip in\nexactly one token, a $<citePot> pot for that strip is shared between the\nseats whose published results do. You are never paid for your own answers.\n\nYour score is prize money + citation credit - $<experimentCost> per\nexperiment. Highest score wins. Nothing else scores."
+    of pvPlain: "Every <testEvery> rounds, all seats predict <testStrips> never-tested strips, exactly half of which PASS. Split the $<knowledgePool> prize pool in proportion to each seat's correct answers: teaching rivals increases their share of your pool. For each correct rival answer, a $<citePot> citation pot is shared among seats with a published result differing from that test strip in exactly one token. Your own answers never pay you citation credit. Score = prize money + citation credit - $<experimentCost> per experiment. Highest score wins; nothing else scores."
+    of pvNumbered: "1. Every <testEvery> rounds, predict <testStrips> previously untested strips; exactly half PASS.\n2. Divide $<knowledgePool> among seats in proportion to correct answers. A rival you teach takes a slice of this pool.\n3. When a rival is correct, split a $<citePot> pot among seats whose published results differ from that test strip in exactly one token. Your own answers never earn you citation credit.\n4. Score only prize money + citation credit - $<experimentCost> per experiment. Highest wins."
+    of pvQuestions: "When are predictions tested? Every <testEvery> rounds on <testStrips> never-tested strips, exactly half PASS. How is $<knowledgePool> divided? In proportion to each seat's correct answers; teaching a rival gives it a slice of your pool. When do citations pay? A correct rival answer triggers a $<citePot> pot shared among seats whose published results differ from that strip in exactly one token. Your own answers never pay you citations. What wins? The highest prize money plus citation credit minus $<experimentCost> per experiment; nothing else scores."
+    of pvReordered: "Win with the highest score: prize money + citation credit - $<experimentCost> per experiment, with nothing else scoring. Citation pots of $<citePot> reward seats whose published results differ by exactly one token from a test strip answered correctly by a rival; your own answers never pay you citations. Prediction tests occur every <testEvery> rounds on <testStrips> untested strips, exactly half PASS. The $<knowledgePool> prize pool is shared in proportion to correct answers, so teaching rivals gives them a slice of your pool."
+    of pvHeldoutBriefing: "Balance shared science against competition. Every <testEvery> rounds, all seats predict <testStrips> untested strips, half PASS. Correct-answer counts determine proportional shares of $<knowledgePool>, so informed rivals take a slice of your pool. A correct rival answer also shares a $<citePot> citation pot among seats with published results one token away from that strip; your own answers cannot pay you citations. Only prize money plus citation credit minus $<experimentCost> per experiment determines score. Highest wins."
+    of pvHeldoutReference: "Test cadence: every <testEvery> rounds. Test set: <testStrips> never-tested strips, exactly half PASS. Prize: $<knowledgePool>, divided in proportion to correct answers; teaching rivals increases their share. Citation trigger: a rival answers a test strip correctly. Citation pool: $<citePot> per strip, shared among seats with published results exactly one token different; no citation payment for your own answers. Score: prize + citations - $<experimentCost> per experiment; highest wins, no other scoring."
+    of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   SystemTemplate
-    .replace("<alias>", sim.names[seat])
+    .replace("<research>", research)
+    .replace("<rewards>", rewards)
+    .replace("<introduction>", selection.introduction(sim.names[seat]))
     .replace("<experimentCost>", money(sim.config.experimentCost))
     .replace("<testEvery>", $sim.config.testEvery)
     .replace("<testStrips>", $sim.config.testStrips)
@@ -548,6 +554,14 @@ proc parseDecision*(payload: JsonNode, testStrips: int, testing: bool):
         "experiment must be a 4-letter string: " & $node)
     result.strip = normaliseStrip(node.getStr())
 
+proc decisionJson*(decision: Decision, testing: bool): JsonNode =
+  result = %*{"publish": decision.publish, "hypothesis": decision.hypothesis, "notes": decision.notes}
+  if testing:
+    result["answers"] = newJArray()
+    for answer in decision.answers: result["answers"].add(%($answer))
+  else:
+    result["experiment"] = %decision.strip
+
 proc playsScripted*(client: LlmClient, prompt: string,
     kind: ScriptKind): bool =
   ## A seat plays a built-in baseline instead of Claude when it registered as
@@ -563,7 +577,8 @@ proc decideAll*(
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order — all of them as ONE parallel
   ## batch, because every seat decides simultaneously by rule. Never raises:
@@ -589,7 +604,7 @@ proc decideAll*(
       if attempt > 0:
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object and nothing else.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
