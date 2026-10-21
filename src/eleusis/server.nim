@@ -28,11 +28,11 @@
 
 import
   std/[json, locks, options, os, sets, strutils, tables, times, unicode],
-  bitworld/runtime,
+  bitworld/[runtime, decision_trajectory],
   curly,
   mummy,
   mummy/routers,
-  llm,
+  llm, observations,
   sim
 
 const
@@ -45,6 +45,7 @@ const
 
 type
   GameState = object
+    trajectory: DecisionTrajectory
     selection: PromptSelection
     config: GameConfig
     sim: Sim
@@ -217,6 +218,13 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if not state.trajectory.isNil:
+      var participants = newJObject()
+      for seat in 0 ..< Seats:
+        participants[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.finish(
+        (if results["reason"].getStr() == "complete": esCompleted else: esTruncated),
+        results, participants)
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -242,6 +250,8 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.broadcastLocked()
 
   sleep(500)
+  if not state.trajectory.isNil:
+    state.trajectory.writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
   echo "eleusis: writing results and replay"
   writeArtifact(
     runtimeConfig.resultsUri, $results, "application/json",
@@ -388,6 +398,9 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
+          var installed = decision
+          var applied = false
+          var fallbackUsed = false
           ## A decision the LLM never delivered is a scripted move, and it is
           ## recorded as one: `scripted` true and `fallback` true on the event.
           let wasScripted =
@@ -408,21 +421,68 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                 decision.hypothesis, decision.notes,
                 wasScripted and not externalAction,
                 decision.fallback)
+            applied = true
           except CatchableError as error:
+            fallbackUsed = true
+            for evidence in installed.attempts.mitems:
+              if evidence.accepted:
+                evidence.accepted = false
+                evidence.rejectionReason = some(error.msg)
+            installed.selectedAttemptId = none(string)
             echo "eleusis: reply rejected (", error.msg,
               "); using scripted fallback"
             ## Degrade, never hang: if even the fallback is refused the turn
             ## simply stays open and the play deadline settles the episode.
             try:
-              let fallback = scriptedAction(state.sim, seat, skOpenbook)
+              let fallback = scriptedAction(simCopy, seat, skOpenbook)
+              let attempts = installed.attempts
+              installed = fallback
+              installed.notes = ""
+              installed.attempts = attempts
               if testing:
                 state.sim.applyAnswers(seat, fallback.answers,
                   fallback.publish, fallback.hypothesis, "", true, true)
               else:
                 state.sim.applyResearch(seat, fallback.strip,
                   fallback.publish, fallback.hypothesis, "", true, true)
+              applied = true
             except CatchableError as inner:
               echo "eleusis: scripted fallback refused too: ", inner.msg
+          if not state.trajectory.isNil:
+            var observation = decisionView(simCopy, seat, true)
+            let system = systemPrompt(simCopy, seat, state.selection)
+            let user = userPrompt(simCopy, seat, prompts[seat])
+            observation["prompt_template"] = state.selection.promptMetadata(system, user)
+            observation["prompt_attempts"] = newJArray()
+            var attempts = installed.attempts
+            var selected = installed.selectedAttemptId
+            var status = if applied: asFallback else: asMissing
+            var fallback = if applied: some("engine-openbook") else: none(string)
+            if applied and not fallbackUsed and not decision.fallback:
+              if selected.isSome:
+                status = asAccepted
+                fallback = none(string)
+              elif externalAction or scripted[seat] != skNone:
+                var evidence = newDecisionAttempt($decisionId & "-" & $seat & "-applied",
+                  (if externalAction: "external" else: $scripted[seat]),
+                  (if externalAction: aoUnknown else: aoTeacher))
+                evidence.prompt = %*[{"role": "system", "content": system}, {"role": "user", "content": user}]
+                evidence.response = %($decisionJson(installed, testing))
+                evidence.parsedAction = decisionJson(installed, testing)
+                evidence.accepted = true
+                attempts.add(evidence)
+                selected = some(evidence.attemptId)
+                status = asAccepted
+                fallback = none(string)
+            for evidence in attempts:
+              if evidence.prompt.kind == JArray and evidence.prompt.len == 2:
+                observation["prompt_attempts"].add(%*{"attempt_id": evidence.attemptId,
+                  "prompt_template": state.selection.promptMetadata(
+                    evidence.prompt[0]["content"].getStr(), evidence.prompt[1]["content"].getStr())})
+            state.trajectory.recordDecision($decisionId & "-" & $seat, $seat,
+              observation, attempts, selected,
+              (if applied: decisionJson(installed, testing) else: newJNull()),
+              status, terminal = state.sim.done, fallbackOrigin = fallback)
         state.broadcastLocked()
 
       ## Floor the wall-clock gap between the STARTS of consecutive batches:
@@ -676,6 +736,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.external = newSeq[bool](config.players.len)
   state.pendingActions = newSeq[JsonNode](config.players.len)
   runtimeConfigGlobal = runtimeConfig
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "eleusis-" & $config.seed, "eleusis", getEnv("COWORLD_GAME_VERSION"),
+      getEnv("COWORLD_SOURCE_REVISION"))
 
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler)

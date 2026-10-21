@@ -79,3 +79,35 @@ including private notes, simultaneous public hypotheses, and normalized actions.
 The export workflow runs 30 complete games and checks batch visibility,
 seed-family separation, and research/prediction action grammar.
 These deterministic checks do not demonstrate improved learning or robustness.
+
+## Hosted canonical capture
+
+When `COGAME_SAVE_TRAJECTORY_URI` is supplied, the native server writes a private
+canonical decision trajectory before publishing results. Runtime episode ID,
+game version, and source revision are required. The capture uses the shared
+bitworld decision-trajectory contract. It includes exact model request/response
+bytes, platform call IDs, per-attempt prompt hashes, parser outcomes, retries,
+selected actions, scripted/fallback origins, and terminal per-seat scores.
+Decoder evidence contains only settings actually sent to the provider.
+
+Every observation comes from the simultaneous pre-batch state. The secret rule
+and other seats' private facts never enter a decision observation. Scripted
+policies are explicit teacher candidates requiring downstream review; an engine
+fallback is not a teacher. External actions without provider evidence have
+unknown origin and cannot be admitted as model labels. Deadline endings are
+truncated, not completed training games. Private capture is not added to replay.
+The existing numeric/text bridge and offline teacher exporter remain separate.
+
+Build game and player with the locked dependencies, then run the no-cost native
+provider fixture (OUTPUT must be a new directory):
+
+```sh
+python3 tools/test_native_trajectory.py /path/to/eleusis /path/to/eleusis-player /tmp/NEW-eleusis-capture-proof
+```
+
+Each fixture plays all 24 research rounds and four prediction tests at standard
+scoring, with only pacing disabled. Cases cover exact accepted replies, invalid
+responses and repairs, provider errors, and explicitly selected scripted seats.
+Fixture responses are plumbing evidence, not qualified teacher demonstrations.
+Fresh hosted receipts and a published immutable release are still required for
+production data admission.

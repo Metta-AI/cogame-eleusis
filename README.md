@@ -155,3 +155,13 @@ Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=openbook` or
 
 Prompt variants, wording metadata, and seeded teacher exports are documented
 in [TRAINING.md](TRAINING.md).
+
+## Pinning a hosted teacher model
+
+Set `hostedModel` in the game configuration (or an Experience Request's
+`game_config_overrides`) to the exact canonical `provider/model` name. It overrides
+`COWORLD_LLM_MODEL` for native game-owned calls and requires a sidecar endpoint.
+Omit it or use an empty string to retain existing environment/default behavior.
+The direct-provider `model` field is unchanged. Provider allowlists still apply;
+this does not route game calls through a player's separately registered endpoint.
+Use captured request and receipt identities to verify the actual served model.

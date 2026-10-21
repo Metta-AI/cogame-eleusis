@@ -21,8 +21,8 @@
 ## scripted plays one deliberately, LLM or not.
 
 import
-  std/[json, options, os, random, sets, strutils, unicode],
-  bitworld/runtime,
+  std/[json, options, os, random, sets, strutils, times, unicode],
+  bitworld/[runtime, decision_trajectory],
   curly,
   sim, prompts
 export prompts
@@ -40,6 +40,8 @@ type
     skFreerider = "freerider"
 
   Decision* = object
+    attempts*: seq[DecisionAttempt]
+    selectedAttemptId*: Option[string]
     strip*: string          ## "" = skip (no experiment, no cost)
     publish*: bool
     answers*: seq[Verdict]  ## test turns only
@@ -132,10 +134,13 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     timeoutSeconds: config.llmTimeoutSeconds
   )
   let sidecarEndpoint = getEnv("COWORLD_LLM_ENDPOINT").strip()
+  if config.hostedModel.len > 0 and sidecarEndpoint.len == 0:
+    raise newException(EleusisError, "hostedModel requires COWORLD_LLM_ENDPOINT")
   if sidecarEndpoint.len > 0:
     result.transport = ltSidecar
     result.sidecarEndpoint = sidecarEndpoint.strip(chars = {'/'}, leading = false)
-    result.model = getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")
+    result.model = if config.hostedModel.len > 0: config.hostedModel
+      else: getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")
     result.curl = newCurly()
     return
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
@@ -598,6 +603,7 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var evidenceBatch: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
@@ -605,16 +611,43 @@ proc decideAll*(
         user.add("\n\nYour previous reply was invalid. Respond with ONLY " &
           "the requested JSON object and nothing else.")
       let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
+      var evidence = newDecisionAttempt($sim.round & "-" & $sim.phase & "-" & $seat & "-" & $attempt,
+        "prompt", aoModel)
+      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
+        {"role": "user", "content": user}]
+      evidence.request = parseJson(request.body)
+      evidence.decoder = %*{"max_tokens": client.maxOutputTokens}
+      if evidence.request.hasKey("output_config"):
+        evidence.decoder["output_config"] = evidence.request["output_config"]
+      if evidence.request.hasKey("model"):
+        evidence.model = some(evidence.request["model"].getStr())
+      evidenceBatch.add(evidence)
       batch.post(request.url, request.headers, request.body, $index)
+    let started = epochTime()
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence = evidenceBatch[position]
+      let native = responses[position].response
+      evidence.rawResponse = %native.body
+      evidence.httpStatus = some(native.code)
+      evidence.latencyMs = some((epochTime() - started) * 1000)
+      if native.headers["x-softmax-llm-call-id"].len > 0:
+        evidence.platformCallId = some(native.headers["x-softmax-llm-call-id"])
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        let decision = parseDecision(extractJsonObject(text),
+        evidence.response = %text
+        let payload = parseJson(native.body)
+        if payload.hasKey("model"): evidence.model = some(payload["model"].getStr())
+        if payload.hasKey("stop_reason"): evidence.stopReason = some(payload["stop_reason"].getStr())
+        if payload.hasKey("usage"):
+          if payload["usage"].hasKey("input_tokens"): evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
+          if payload["usage"].hasKey("output_tokens"): evidence.outputTokens = some(payload["usage"]["output_tokens"].getInt())
+        var decision = parseDecision(extractJsonObject(text),
           sim.config.testStrips, testing)
+        evidence.parsedAction = decisionJson(decision, testing)
         ## Reject illegal replies HERE so the retry carries the hint and an
         ## illegal move never reaches the real sim.
         var probe = sim
@@ -624,8 +657,13 @@ proc decideAll*(
         else:
           probe.applyResearch(seat, decision.strip, decision.publish,
             decision.hypothesis, decision.notes, false)
+        evidence.accepted = true
+        decision.attempts = result[index].attempts & @[evidence]
+        decision.selectedAttemptId = some(evidence.attemptId)
         result[index] = decision
       except CatchableError as error:
+        evidence.rejectionReason = some(error.msg)
+        result[index].attempts.add(evidence)
         echo "eleusis llm: seat ", seat, " attempt ", attempt, " failed: ",
           error.msg
         stillOpen.add(index)
@@ -633,7 +671,9 @@ proc decideAll*(
   for index in open:
     let seat = seats[index]
     echo "eleusis llm: seat ", seat, " falling back to scripted decision"
+    let attempts = result[index].attempts
     result[index] = scriptedAction(sim, seat, skOpenbook)
+    result[index].attempts = attempts
     ## Recorded on the decision event too, not only on stdout: the replay is
     ## what phase 60 counts fallbacks from.
     result[index].fallback = true
