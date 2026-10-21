@@ -134,10 +134,13 @@ proc newLlmClient*(config: GameConfig): LlmClient =
     timeoutSeconds: config.llmTimeoutSeconds
   )
   let sidecarEndpoint = getEnv("COWORLD_LLM_ENDPOINT").strip()
+  if config.hostedModel.len > 0 and sidecarEndpoint.len == 0:
+    raise newException(EleusisError, "hostedModel requires COWORLD_LLM_ENDPOINT")
   if sidecarEndpoint.len > 0:
     result.transport = ltSidecar
     result.sidecarEndpoint = sidecarEndpoint.strip(chars = {'/'}, leading = false)
-    result.model = getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")
+    result.model = if config.hostedModel.len > 0: config.hostedModel
+      else: getEnv("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")
     result.curl = newCurly()
     return
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()

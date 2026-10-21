@@ -224,46 +224,46 @@ PLAYER_PROTOCOL = (
     "seat's own experiment log, the corkboard, the scoreboard, the test "
     "results and its private notes to Claude once a turn, all five seats as "
     "one parallel batch. game->player frames: "
-    "{\"type\":\"welcome\",\"protocol\":\"eleusis.player.v1\",\"slot\":N,"
-    "\"name\":str,\"rounds\":int,\"testEvery\":int} on connect; "
-    "{\"type\":\"state\",\"slot\":N,\"name\":str,\"round\":int,"
-    "\"rounds\":int,\"phase\":\"research|test|done\",\"score\":float,"
-    "\"knowledge\":float,\"credit\":float,\"spend\":float,"
-    "\"experiments\":int,\"published\":int,\"hoarded\":int,\"correct\":int,"
-    "\"answered\":int,\"pending\":{\"strip\":str,\"verdict\":\"pass|fail\"}"
-    "|null,\"boardSize\":int,\"started\":bool,\"done\":bool,\"reason\":str} "
+    '{"type":"welcome","protocol":"eleusis.player.v1","slot":N,'
+    '"name":str,"rounds":int,"testEvery":int} on connect; '
+    '{"type":"state","slot":N,"name":str,"round":int,'
+    '"rounds":int,"phase":"research|test|done","score":float,'
+    '"knowledge":float,"credit":float,"spend":float,'
+    '"experiments":int,"published":int,"hoarded":int,"correct":int,'
+    '"answered":int,"pending":{"strip":str,"verdict":"pass|fail"}'
+    '|null,"boardSize":int,"started":bool,"done":bool,"reason":str} '
     "after every event - REDACTED to the seat's own numbers, because the game "
     "is hidden-information: it never carries the rule, the test truth, "
     "another seat's drawer or another seat's notes (decisions are "
     "server-side, so the redaction loses the policy nothing); "
-    "{\"type\":\"final\",\"done\":true,\"scores\":[5],\"names\":[5 aliases],"
-    "\"rule\":str,\"closest\":int,\"reason\":str} at episode end, after which "
+    '{"type":"final","done":true,"scores":[5],"names":[5 aliases],'
+    '"rule":str,"closest":int,"reason":str} at episode end, after which '
     "the player should exit. player->game frames: "
-    "{\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max "
+    '{"type":"prompt","prompt":str,"scripted":str} - the prompt (max '
     "4000 runes) is the policy, sent right after connecting and again after "
-    "welcome; scripted \"openbook\" (or \"1\") plays the built-in "
-    "publish-everything baseline for that seat, \"hoarder\" the "
-    "publish-nothing one, \"\" means LLM-driven. The reference player reads "
+    'welcome; scripted "openbook" (or "1") plays the built-in '
+    'publish-everything baseline for that seat, "hoarder" the '
+    'publish-nothing one, "" means LLM-driven. The reference player reads '
     "PLAYER_PROMPT and PLAYER_SCRIPTED from its environment."
 )
 
 GLOBAL_PROTOCOL = (
     "Global spectators connect a websocket to /global and receive the full "
     "bench snapshot as JSON after every event: "
-    "{\"type\":\"state\",\"game\":\"eleusis\",\"seats\":[{name,score,"
+    '{"type":"state","game":"eleusis","seats":[{name,score,'
     "knowledge,credit,spend,experiments,published,hoarded,correct,answered,"
     "hypothesis,notes,pending,last:{strip,verdict,mode}|null,"
-    "secrets:[{strip,verdict,round}]} x5 by seat],\"board\":[{strip,verdict,"
-    "author,round,cites,duplicate} in publication order],\"machine\":{seat,"
-    "round,strip,verdict}|null,\"test\":{index,round,strips,truth,answers,"
-    "correct,open,discarded}|null,\"citations\":[{author,by,strip,amount,test}],"
-    "\"decided\":int,\"round\":int,\"rounds\":int,\"testEvery\":int,"
-    "\"testStrips\":int,\"testsDone\":int,\"experimentCost\":float,"
-    "\"knowledgePool\":float,\"citePot\":float,\"phase\":\"research|test|"
-    "done\",\"rule\":str,\"ruleId\":int,\"closest\":int,\"gameDone\":bool,"
-    "\"reason\":str,\"policyNames\":[...],\"events\":[{kind:start|round|"
-    "experiment|skip|disclose|test|answer|settle|end,...}],\"started\":bool,"
-    "\"done\":bool,\"connected\":[bool]}. The hidden rule (`rule`, `ruleId`), "
+    'secrets:[{strip,verdict,round}]} x5 by seat],"board":[{strip,verdict,'
+    'author,round,cites,duplicate} in publication order],"machine":{seat,'
+    'round,strip,verdict}|null,"test":{index,round,strips,truth,answers,'
+    'correct,open,discarded}|null,"citations":[{author,by,strip,amount,test}],'
+    '"decided":int,"round":int,"rounds":int,"testEvery":int,'
+    '"testStrips":int,"testsDone":int,"experimentCost":float,'
+    '"knowledgePool":float,"citePot":float,"phase":"research|test|'
+    'done","rule":str,"ruleId":int,"closest":int,"gameDone":bool,'
+    '"reason":str,"policyNames":[...],"events":[{kind:start|round|'
+    'experiment|skip|disclose|test|answer|settle|end,...}],"started":bool,'
+    '"done":bool,"connected":[bool]}. The hidden rule (`rule`, `ruleId`), '
     "the test `truth` and every seat's `secrets` and `notes` are "
     "SPECTATOR-ONLY: they appear here and in the replay, never on a player "
     "socket. The events array is append-only and carries the complete "
@@ -318,8 +318,16 @@ CONFIG_SCHEMA = {
         },
         "promptVariant": {
             "type": "string",
-            "enum": ["canonical", "plain", "numbered", "questions", "reordered",
-                     "heldout-briefing", "heldout-reference", "mixed"],
+            "enum": [
+                "canonical",
+                "plain",
+                "numbered",
+                "questions",
+                "reordered",
+                "heldout-briefing",
+                "heldout-reference",
+                "mixed",
+            ],
             "default": "canonical",
             "description": "Episode-stable wording; held-out variants are evaluation-only.",
         },
@@ -350,8 +358,7 @@ CONFIG_SCHEMA = {
         },
         "testStrips": {
             "description": (
-                "Strips per prediction test, half PASS and half FAIL. Must be "
-                "even."
+                "Strips per prediction test, half PASS and half FAIL. Must be even."
             ),
             "type": "integer",
             "minimum": 2,
@@ -415,6 +422,12 @@ CONFIG_SCHEMA = {
             "maximum": 10000,
             "default": 0,
         },
+        "hostedModel": {
+            "type": "string",
+            "default": "",
+            "pattern": "^$|^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+            "description": "Explicit canonical model for native hosted sidecar calls. Overrides COWORLD_LLM_MODEL; empty preserves the environment/default. Requires the hosted sidecar. Direct-provider model is separate.",
+        },
         "model": {
             "description": "Claude model that drives every seat.",
             "type": "string",
@@ -445,9 +458,24 @@ RESULTS_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "names", "scores", "knowledge", "credit", "spend", "correct",
-        "answered", "accuracy", "published", "hoarded", "rounds", "maxRounds",
-        "tests", "ruleId", "rule", "closest", "closestName", "reason",
+        "names",
+        "scores",
+        "knowledge",
+        "credit",
+        "spend",
+        "correct",
+        "answered",
+        "accuracy",
+        "published",
+        "hoarded",
+        "rounds",
+        "maxRounds",
+        "tests",
+        "ruleId",
+        "rule",
+        "closest",
+        "closestName",
+        "reason",
     ],
     "properties": {
         "names": seat_array(
@@ -527,7 +555,7 @@ RESULTS_SCHEMA = {
             "maximum": SEATS - 1,
         },
         "closestName": {
-            "description": "That seat's policy name, or \"\".",
+            "description": 'That seat\'s policy name, or "".',
             "type": "string",
         },
         "reason": {
@@ -668,8 +696,7 @@ MANIFEST = {
         variant(
             "standard",
             "Standard laboratory",
-            "Five cogs, 24 rounds, a prediction test every 6, citation pot "
-            "$0.50.",
+            "Five cogs, 24 rounds, a prediction test every 6, citation pot $0.50.",
             0.5,
         ),
         variant(

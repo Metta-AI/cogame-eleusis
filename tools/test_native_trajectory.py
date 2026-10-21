@@ -27,6 +27,7 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
         def do_POST(self, mode=mode, calls=calls):
             assert self.path == "/v1/messages"
             request = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            assert request["model"] == "fixture/pinned"
             seat = int(self.headers["X-Coworld-Player-Slot"])
             testing = request["messages"][0]["content"].startswith("PREDICTION TEST")
             action = {
@@ -73,6 +74,7 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
         "rounds": 24,
         "testEvery": 6,
         "testStrips": 6,
+        "hostedModel": "fixture/pinned",
         "promptVariant": "mixed",
         "promptSeed": 4,
         "minBatchSpacingMs": 0,
