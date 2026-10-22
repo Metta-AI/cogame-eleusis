@@ -146,6 +146,7 @@ when isMainModule:
   var batch: array[Seats, Decision]
   var seat = 0
   var id = 0
+  var auditScenario: JsonNode
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
     var response: JsonNode
@@ -169,7 +170,19 @@ when isMainModule:
       view = game
       seat = 0
       id = 0
+      # Private split audit only: never attach hidden state to a decision.
+      let family = %*{"rule_id": game.ruleId}
+      auditScenario = %*{"protocol": "coworld.native-scenario-audit.v1",
+        "game": "eleusis", "seed": request["seed"].getStr(),
+        "engine_seed": game.config.seed, "family": family}
       response = view.decision(seat, id, selection, textMode)
+    of "audit_scenario":
+      if getEnv("METTA_SCENARIO_AUDIT") != "1":
+        response = %*{"kind": "error", "reason": "scenario audit is disabled"}
+      elif auditScenario.isNil:
+        response = %*{"kind": "error", "reason": "reset is required before scenario audit"}
+      else:
+        response = auditScenario
     of "encode":
       doAssert not game.done
       response = view.encoding(seat, id, variant)
