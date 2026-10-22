@@ -181,15 +181,32 @@ when isMainModule:
         else: action(teacher, view.phase == phTest))}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
-      let chosen = extractJsonObject(request["response"].getStr())
       let testing = view.phase == phTest
-      var payload = chosen
-      if not textMode:
-        for head in view.heads():
-          let name = head["name"].getStr()
-          doAssert chosen[name] in head["choices"], "action is masked: " & name
-        payload = hostedAction(chosen, testing)
-      let parsed = parseDecision(payload, game.config.testStrips, testing)
+      var chosen: JsonNode
+      var parsed: Decision
+      try:
+        chosen = extractJsonObject(request["response"].getStr())
+        var payload = chosen
+        if not textMode:
+          for head in view.heads():
+            let name = head["name"].getStr()
+            if chosen{name} notin head["choices"]:
+              raise newException(EleusisError, "action is masked: " & name)
+          payload = hostedAction(chosen, testing)
+        parsed = parseDecision(payload, game.config.testStrips, testing)
+        # Validate on the same pre-batch view; an invalid proposal must not
+        # change the pending batch or advance the simultaneous seat cursor.
+        var probe = view
+        if testing:
+          probe.applyAnswers(seat, parsed.answers, parsed.publish, parsed.hypothesis, parsed.notes, false)
+        else:
+          probe.applyResearch(seat, parsed.strip, parsed.publish, parsed.hypothesis, parsed.notes, false)
+      except CatchableError as error:
+        response = %*{"kind": "rejected", "reason": error.msg,
+          "observation": view.decision(seat, id, selection, textMode)}
+        stdout.writeLine($response)
+        stdout.flushFile()
+        continue
       batch[seat] = parsed
       let accepted = if textMode: decisionJson(parsed, testing) else: chosen
       inc seat
