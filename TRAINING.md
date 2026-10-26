@@ -111,3 +111,23 @@ responses and repairs, provider errors, and explicitly selected scripted seats.
 Fixture responses are plumbing evidence, not qualified teacher demonstrations.
 Fresh hosted receipts and a published immutable release are still required for
 production data admission.
+
+## Explicit offline teacher queries
+
+The training bridge accepts `{"kind":"teacher","policy":"openbook"}`,
+`hoarder`, or `freerider`. An explicit query returns the exact response plus
+`policy` and `decision_id`. Omitting `policy` retains the original even-seat
+openbook / odd-seat hoarder behavior and response shape. Invalid policy values
+return an error without advancing the game. Teacher queries never apply actions;
+submit the selected response through the ordinary `step` path.
+
+This lets a collector compare teacher quality for every seat without changing
+learner observations, opponent defaults, or historical datasets. Each policy
+uses that seat's known facts and the public rule catalogue; it does not read the
+hidden rule or undisclosed test answers. Preserve the explicit query, selected
+policy, source/binary hashes, replies and complete-game outcomes in any new
+collection. A different teacher query is a new collection protocol, not a relabel
+of existing targets or an automatic training-data admission.
+
+Run `python3 tools/test_teacher_policies.py BINARY --reference ORIGINAL_BINARY`
+to check complete games, state-preserving queries and exact default-play parity.

@@ -188,10 +188,22 @@ when isMainModule:
       response = view.encoding(seat, id, variant)
     of "teacher":
       doAssert not game.done
-      let teacher = scriptedAction(view, seat,
-        if seat mod 2 == 0: skOpenbook else: skHoarder)
-      response = %*{"response": $(if textMode: decisionJson(teacher, view.phase == phTest)
-        else: action(teacher, view.phase == phTest))}
+      var kind = if seat mod 2 == 0: skOpenbook else: skHoarder
+      if request.hasKey("policy"):
+        let policy = if request["policy"].kind == JString: request["policy"].getStr() else: ""
+        case policy
+        of "openbook": kind = skOpenbook
+        of "hoarder": kind = skHoarder
+        of "freerider": kind = skFreerider
+        else:
+          response = %*{"kind": "error", "reason": "unknown scripted teacher policy"}
+      if response.isNil:
+        let teacher = scriptedAction(view, seat, kind)
+        response = %*{"response": $(if textMode: decisionJson(teacher, view.phase == phTest)
+          else: action(teacher, view.phase == phTest))}
+        if request.hasKey("policy"):
+          response["policy"] = %($kind)
+          response["decision_id"] = %id
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
       let testing = view.phase == phTest
