@@ -89,6 +89,18 @@ bitworld decision-trajectory contract. It includes exact model request/response
 bytes, platform call IDs, per-attempt prompt hashes, parser outcomes, retries,
 selected actions, scripted/fallback origins, and terminal per-seat scores.
 Decoder evidence contains only settings actually sent to the provider.
+Nonempty applied hypothesis and notebook fields are read back from native state;
+parser proposals remain unchanged when the simulator normalizes them. Such
+mismatches are recorded as rejected training proposals with their actual applied
+actions and no selected target. They are not relabeled as engine fallback.
+
+Native capture groups physical scenario families by the actual hidden catalogue
+rule (`eleusis-rule-<rule_id>`), rather than the requested random seed. Different
+seeds selecting the same latent rule stay in one split across variants and
+wordings. The family is private episode metadata and never enters player prompts
+or observations. Historical native captures and offline teacher exports retain
+their original source identities and seed-based labels; audit and regroup them
+from their original hidden-rule evidence before claiming independent splits.
 
 Every observation comes from the simultaneous pre-batch state. The secret rule
 and other seats' private facts never enter a decision observation. Scripted
@@ -107,7 +119,11 @@ python3 tools/test_native_trajectory.py /path/to/eleusis /path/to/eleusis-player
 
 Each fixture plays all 24 research rounds and four prediction tests at standard
 scoring, with only pacing disabled. Cases cover exact accepted replies, invalid
-responses and repairs, provider errors, and explicitly selected scripted seats.
+responses, provider errors, preserved parser/simulator normalization, and explicitly selected
+scripted seats. Set `ELEUSIS_FIXTURE_SEED` to choose an explicit native seed;
+`ELEUSIS_FIXTURE_MODE=accepted` selects the full-game positive cohort. The fixture
+checks the private family against the rule revealed by the completed public
+replay, and writes a compact `proof.json` with outcomes and binary hashes.
 Fixture responses are plumbing evidence, not qualified teacher demonstrations.
 Fresh hosted receipts and a published immutable release are still required for
 production data admission.

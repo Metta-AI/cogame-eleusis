@@ -454,6 +454,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             let user = userPrompt(simCopy, seat, prompts[seat])
             observation["prompt_template"] = state.selection.promptMetadata(system, user)
             observation["prompt_attempts"] = newJArray()
+            var executed = if applied: decisionJson(installed, testing) else: newJNull()
+            if applied:
+              if installed.hypothesis.len > 0:
+                executed["hypothesis"] = %state.sim.seats[seat].hypothesis
+              if installed.notes.len > 0:
+                executed["notes"] = %state.sim.seats[seat].notes
             var attempts = installed.attempts
             var selected = installed.selectedAttemptId
             var status = if applied: asFallback else: asMissing
@@ -474,6 +480,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                 selected = some(evidence.attemptId)
                 status = asAccepted
                 fallback = none(string)
+            if selected.isSome:
+              let selectedId = selected.get()
+              for evidence in attempts.mitems:
+                if evidence.attemptId == selectedId and evidence.parsedAction != executed:
+                  evidence.accepted = false
+                  evidence.rejectionReason = some("simulator normalized the applied action")
+                  selected = none(string)
+                  status = asRejected
+                  fallback = none(string)
             for evidence in attempts:
               if evidence.prompt.kind == JArray and evidence.prompt.len == 2:
                 observation["prompt_attempts"].add(%*{"attempt_id": evidence.attemptId,
@@ -481,8 +496,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
                     evidence.prompt[0]["content"].getStr(), evidence.prompt[1]["content"].getStr())})
             state.trajectory.recordDecision($decisionId & "-" & $seat, $seat,
               observation, attempts, selected,
-              (if applied: decisionJson(installed, testing) else: newJNull()),
-              status, terminal = state.sim.done, fallbackOrigin = fallback)
+              executed, status, terminal = state.sim.done, fallbackOrigin = fallback)
         state.broadcastLocked()
 
       ## Floor the wall-clock gap between the STARTS of consecutive batches:
@@ -738,7 +752,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   runtimeConfigGlobal = runtimeConfig
   if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
     state.trajectory = newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
-      "eleusis-" & $config.seed, "eleusis", getEnv("COWORLD_GAME_VERSION"),
+      "eleusis-rule-" & $state.sim.ruleId, "eleusis", getEnv("COWORLD_GAME_VERSION"),
       getEnv("COWORLD_SOURCE_REVISION"))
 
   let router = buildRouter(replayMode = false)

@@ -15,7 +15,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GAME, PLAYER, OUTPUT = (Path(arg).resolve() for arg in sys.argv[1:4])
 OUTPUT.mkdir(parents=True, exist_ok=False, mode=0o700)
-for mode in ("accepted", "invalid", "provider-error", "scripted"):
+for mode in (
+    "accepted",
+    "invalid",
+    "provider-error",
+    "normalized",
+    "applied-text",
+    "scripted",
+):
     if (
         os.environ.get("ELEUSIS_FIXTURE_MODE")
         and mode != os.environ["ELEUSIS_FIXTURE_MODE"]
@@ -35,7 +42,13 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
                 "hypothesis": "fixture",
                 "notes": "private-fixture-notes",
             }
-            action.update({"answers": ["PASS"] * 6} if testing else {"experiment": ""})
+            action.update({"answers": ["pass"] * 6} if testing else {"experiment": ""})
+            if mode == "normalized" and seat == 0:
+                action["notes"] = "fixture-note-" * 80
+                if testing:
+                    action["answers"] = ["PASS"] * 6
+            if mode == "applied-text" and seat == 0:
+                action["hypothesis"] = "fixture\rprivate"
             text = "not JSON" if mode == "invalid" and seat == 0 else json.dumps(action)
             body = {
                 "model": "fixture/served",
@@ -70,7 +83,7 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
     config = {
         "tokens": [f"t{s}" for s in range(5)],
         "players": [{"name": f"p{s}"} for s in range(5)],
-        "seed": 7,
+        "seed": int(os.environ.get("ELEUSIS_FIXTURE_SEED", "7")),
         "rounds": 24,
         "testEvery": 6,
         "testStrips": 6,
@@ -142,7 +155,28 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
                     event["observation"][key] == batch[0]["observation"][key]
                     for event in batch
                 )
+        replay_data = json.loads((output / "replay.json").read_text())
+        expected_family = f"eleusis-rule-{replay_data['config']['ruleId']}"
+        assert events[-1]["seed_family"] == expected_family
         joined = set()
+        normalized_proposals = 0
+        applied_text_changes = 0
+        native_actions = [
+            event
+            for event in replay_data["events"]
+            if event["kind"] in {"skip", "experiment", "answer"}
+        ]
+        assert len(native_actions) == len(events) - 1
+        for event, native_action in zip(events[:-1], native_actions, strict=True):
+            action = event["executed_action"]
+            if action["hypothesis"]:
+                assert action["hypothesis"] == native_action.get("hypothesis", "")
+            if action["notes"]:
+                assert action["notes"] == native_action.get("text", "")
+            if "answers" in action:
+                assert action["answers"] == native_action["answers"]
+            else:
+                assert action["experiment"] == native_action.get("strip", "")
         for event in events[:-1]:
             assert event["visibility"] == "private"
             assert (
@@ -182,8 +216,20 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
                         request["messages"][0]["content"].encode()
                     ).hexdigest()
                 )
-                if attempt["accepted"]:
+                if mode == "applied-text" and event["seat"] == "0":
+                    assert not attempt["accepted"]
+                    assert attempt["parsed_action"]["hypothesis"] == "fixture\rprivate"
+                    assert event["executed_action"]["hypothesis"] == "fixture private"
+                    assert (
+                        attempt["rejection_reason"]
+                        == "simulator normalized the applied action"
+                    )
+                    applied_text_changes += 1
+                elif attempt["accepted"]:
                     assert attempt["parsed_action"] == event["executed_action"]
+                    if json.loads(attempt["response"]) != attempt["parsed_action"]:
+                        normalized_proposals += 1
+                        assert mode == "normalized" and event["seat"] == "0"
                 else:
                     assert attempt["rejection_reason"]
             if mode in {"invalid", "provider-error"} and event["seat"] == "0":
@@ -192,12 +238,46 @@ for mode in ("accepted", "invalid", "provider-error", "scripted"):
                     and event["selected_attempt_id"] is None
                 )
                 assert len(event["attempts"]) == 2
+            elif mode == "applied-text" and event["seat"] == "0":
+                assert event["action_status"] == "rejected"
+                assert event["selected_attempt_id"] is None
+                assert event["fallback_origin"] is None
             else:
                 assert event["action_status"] == "accepted"
         assert joined == set(calls)
         replay = (output / "replay.json").read_text()
         assert "platform_call_id" not in replay and "prompt_attempts" not in replay
-        print(mode, "140 decisions", len(joined), "exact provider joins", flush=True)
+        assert normalized_proposals == (28 if mode == "normalized" else 0)
+        assert applied_text_changes == (28 if mode == "applied-text" else 0)
+        proof = {
+            "mode": mode,
+            "requested_seed": config["seed"],
+            "hidden_rule_id": replay_data["config"]["ruleId"],
+            "scenario_family": events[-1]["seed_family"],
+            "decisions": len(events) - 1,
+            "provider_calls": len(joined),
+            "normalized_proposals": normalized_proposals,
+            "applied_text_changes": applied_text_changes,
+            "rejected_decisions": sum(
+                e["action_status"] == "rejected" for e in events[:-1]
+            ),
+            "fallback_decisions": sum(
+                e["action_status"] == "fallback" for e in events[:-1]
+            ),
+            "outcome": events[-1]["outcome"],
+            "model_calls_are_local_fixtures": True,
+            "game_sha256": hashlib.sha256(GAME.read_bytes()).hexdigest(),
+            "player_sha256": hashlib.sha256(PLAYER.read_bytes()).hexdigest(),
+        }
+        (output / "proof.json").write_text(json.dumps(proof, indent=2) + "\n")
+        print(
+            mode,
+            "140 decisions",
+            len(joined),
+            "exact provider joins",
+            expected_family,
+            flush=True,
+        )
     finally:
         for process in processes:
             if process.poll() is None:
